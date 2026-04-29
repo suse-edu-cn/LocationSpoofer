@@ -8,6 +8,7 @@
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com)
 [![KernelSU](https://img.shields.io/badge/Root-KernelSU-orange.svg)](https://kernelsu.org)
 [![LSPosed](https://img.shields.io/badge/Framework-LSPosed-purple.svg)](https://github.com/LSPosed/LSPosed)
+[![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+CsxZGItXdW40ZWVl)
 
 </div>
 
@@ -111,6 +112,13 @@ git clone https://github.com/your-username/LocationSpoofer.git
 - **Map**: AMap 3DMap SDK
 - **Data**: Koin (DI), OkHttp 4, Coroutines Flow
 - **Simulation**: TrajectorySimulator (Haversine 算法 + 方位角插值)
+
+---
+
+## 💬 交流讨论
+
+欢迎加入 Telegram 群组进行技术交流、提供改进建议或反馈 Bug：
+- **Telegram Group**: [点击加入交流群](https://t.me/+CsxZGItXdW40ZWVl)
 
 ---
 
