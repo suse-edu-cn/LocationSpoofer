@@ -24,6 +24,7 @@ val TextSecondaryLight = Color(0xFF57606A)
 val AccentBlue = Color(0xFF388BFD)
 val AccentGreen = Color(0xFF2EA043)
 val AccentOrange = Color(0xFFD29922)
+val AccentPurple = Color(0xFF8957E5)
 val ErrorRed = Color(0xFFF85149)
 
 val AppColorSchemeDark = darkColorScheme(

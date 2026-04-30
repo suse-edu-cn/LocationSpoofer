@@ -53,6 +53,7 @@ import com.suseoaa.locationspoofer.ui.components.AMapView
 import com.suseoaa.locationspoofer.ui.theme.AccentBlue
 import com.suseoaa.locationspoofer.ui.theme.AccentGreen
 import com.suseoaa.locationspoofer.ui.theme.AccentOrange
+import com.suseoaa.locationspoofer.ui.theme.AccentPurple
 import com.suseoaa.locationspoofer.ui.theme.AppColors
 import com.suseoaa.locationspoofer.viewmodel.MainViewModel
 
@@ -294,6 +295,11 @@ fun SpoofingScreen(
             Spacer(Modifier.height(12.dp))
 
             ActionButtons(viewModel, uiState, onExpandMap)
+            Spacer(Modifier.height(12.dp))
+
+            SectionHeader(Icons.Outlined.Language, "全局定位模式", isDark)
+            Spacer(Modifier.height(8.dp))
+            GlobalModeCard(viewModel, uiState, isDark)
             Spacer(Modifier.height(16.dp))
 
             // 已保存的位置列表（显示在操作按钮下方）
@@ -514,6 +520,121 @@ fun ActionButtons(viewModel: MainViewModel, uiState: AppState, onOpenMap: () -> 
                 Text("规划路线", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
+
+// 全局定位模式卡片
+
+@Composable
+fun GlobalModeCard(
+    viewModel: MainViewModel,
+    uiState: AppState,
+    isDark: Boolean
+) {
+    var showKillDialog by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
+                        .background(AccentPurple.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Language, null, tint = AccentPurple, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "全局定位接管",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (uiState.isGlobalModeEnabled) "已接管所有应用的定位请求"
+                        else "仅作用于 LSPosed 作用域内的应用",
+                        color = AppColors.textSecondary(isDark),
+                        fontSize = 12.sp
+                    )
+                }
+                Switch(
+                    checked = uiState.isGlobalModeEnabled,
+                    onCheckedChange = { viewModel.setGlobalMode(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = AccentPurple
+                    )
+                )
+            }
+
+            if (uiState.isGlobalModeEnabled) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentPurple.copy(alpha = 0.08f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Outlined.Info, null,
+                        tint = AccentPurple,
+                        modifier = Modifier.size(14.dp).padding(top = 1.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Xposed 钩子在应用启动时注入。已运行的应用需重启后才会受到全局接管影响。",
+                        color = AccentPurple,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Button(
+                    onClick = { showKillDialog = true },
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
+                ) {
+                    Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("立即对所有应用生效", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
+    if (showKillDialog) {
+        AlertDialog(
+            onDismissRequest = { showKillDialog = false },
+            title = { Text("强制重启所有应用") },
+            text = {
+                Text(
+                    "将强制停止所有第三方应用（本应用除外），使全局定位钩子立即生效。\n\n" +
+                    "正在使用的应用未保存的内容可能丢失，确认继续？"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.killAllUserApps()
+                    showKillDialog = false
+                }) { Text("确认", color = AccentPurple) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKillDialog = false }) { Text("取消") }
+            }
+        )
     }
 }
 

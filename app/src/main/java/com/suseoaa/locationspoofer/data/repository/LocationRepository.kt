@@ -87,6 +87,39 @@ class LocationRepository(
         SpooferProvider.wifiJson = wifiJson
     }
 
+    /**
+     * 启用全局定位接管：
+     * 1. 置位 SpooferProvider.isGlobalMode（供 SpoofingService 读取）
+     * 2. 将 is_global_mode=true 写入 config 文件（供 Xposed 钩子在应用加载时读取）
+     * 3. 执行一系列 Root 系统参数优化
+     */
+    suspend fun enableGlobalMode(): Boolean {
+        SpooferProvider.isGlobalMode = true
+        // 写入配置文件使 Xposed 感知（configManager 会自动从 SpooferProvider 读取 isGlobalMode）
+        configManager.saveConfig(
+            SpooferProvider.latitude, SpooferProvider.longitude,
+            SpooferProvider.isActive, SpooferProvider.simMode, SpooferProvider.simBearing,
+            SpooferProvider.startTimestamp, emptyList(), SpooferProvider.isRouteMode
+        )
+        return rootManager.enableGlobalMode()
+    }
+
+    /**
+     * 关闭全局定位接管，还原系统设置。
+     */
+    suspend fun disableGlobalMode(): Boolean {
+        SpooferProvider.isGlobalMode = false
+        configManager.saveConfig(
+            SpooferProvider.latitude, SpooferProvider.longitude,
+            SpooferProvider.isActive, SpooferProvider.simMode, SpooferProvider.simBearing,
+            SpooferProvider.startTimestamp, emptyList(), SpooferProvider.isRouteMode
+        )
+        return rootManager.disableGlobalMode()
+    }
+
+    /** 强制重启所有第三方应用，使全局 Xposed 钩子立即生效 */
+    suspend fun killAllUserApps(): Boolean = rootManager.killAllUserApps()
+
     private fun routePointsToJson(points: List<RoutePoint>): String {
         val arr = JSONArray()
         points.forEach { p ->

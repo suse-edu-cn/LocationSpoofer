@@ -62,13 +62,18 @@ class MainViewModel(
                 locationRepository.stopSpoofing(context)
             }
 
+            // 恢复持久化的全局模式状态
+            val globalMode = settingsRepository.isGlobalModeEnabled()
+            SpooferProvider.isGlobalMode = globalMode
+
             _uiState.update {
                 it.copy(
                     isInitializing = false,
                     hasRootAccess = root,
                     isLSPosedActive = lsposed,
                     isSpoofingActive = false,
-                    routePlanStage = RoutePlanStage.IDLE
+                    routePlanStage = RoutePlanStage.IDLE,
+                    isGlobalModeEnabled = globalMode
                 )
             }
             fetchCurrentLocation(context)
@@ -474,6 +479,27 @@ class MainViewModel(
         SpooferProvider.longitude = wgsLng
         SpooferProvider.simBearing = bearing
         SpooferProvider.startTimestamp = System.currentTimeMillis()
+    }
+
+    // 全局定位模式
+
+    fun setGlobalMode(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled) {
+                locationRepository.enableGlobalMode()
+            } else {
+                locationRepository.disableGlobalMode()
+            }
+            settingsRepository.setGlobalModeEnabled(enabled)
+            SpooferProvider.isGlobalMode = enabled
+            _uiState.update { it.copy(isGlobalModeEnabled = enabled) }
+        }
+    }
+
+    fun killAllUserApps() {
+        viewModelScope.launch(Dispatchers.IO) {
+            locationRepository.killAllUserApps()
+        }
     }
 
     private fun haversineMeters(a: RoutePoint, b: RoutePoint): Double {

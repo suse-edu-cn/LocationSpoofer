@@ -1,6 +1,7 @@
 package com.suseoaa.locationspoofer.utils
 
 import com.suseoaa.locationspoofer.data.model.RoutePoint
+import com.suseoaa.locationspoofer.provider.SpooferProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -35,6 +36,8 @@ class ConfigManager(private val rootManager: RootManager) {
             put("start_timestamp", startTimestamp)
             put("route_points", routeArray)
             put("is_route_mode", isRouteMode)
+            // 全局模式标志：Xposed 在加载每个应用时读取此字段决定是否全局钩住
+            put("is_global_mode", SpooferProvider.isGlobalMode)
         }
 
         val command = """

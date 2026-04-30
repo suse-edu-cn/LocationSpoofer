@@ -56,5 +56,7 @@ data class AppState(
     /** 自定义速度 (m/s)，仅当 routeSimMode == CUSTOM 时使用 */
     val customSpeedMs: Double = 1.5,
     /** 首页地图已确认的选点（点击地图后出现确认按钮，确认后填充坐标） */
-    val mapConfirmedPoint: Pair<Double, Double>? = null
+    val mapConfirmedPoint: Pair<Double, Double>? = null,
+    /** 全局定位接管：Xposed 钩子作用于所有 App，同时执行 Root 系统级优化 */
+    val isGlobalModeEnabled: Boolean = false
 )

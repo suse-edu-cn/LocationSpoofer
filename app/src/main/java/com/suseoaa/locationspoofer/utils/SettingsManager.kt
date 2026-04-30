@@ -15,6 +15,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("is_dark_mode", true)
         set(value) = prefs.edit().putBoolean("is_dark_mode", value).apply()
 
+    var isGlobalModeEnabled: Boolean
+        get() = prefs.getBoolean("is_global_mode_enabled", false)
+        set(value) = prefs.edit().putBoolean("is_global_mode_enabled", value).apply()
+
     fun getSavedLocations(): List<SavedLocation> {
         val jsonString = prefs.getString("saved_locations", "[]") ?: "[]"
         val list = mutableListOf<SavedLocation>()

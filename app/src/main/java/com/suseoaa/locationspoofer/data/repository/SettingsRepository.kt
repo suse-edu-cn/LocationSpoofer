@@ -17,4 +17,8 @@ class SettingsRepository(private val settingsManager: SettingsManager) {
     fun addSavedRoute(route: SavedRoute) = settingsManager.addSavedRoute(route)
 
     fun removeSavedRoute(route: SavedRoute) = settingsManager.removeSavedRoute(route)
+
+    fun isGlobalModeEnabled(): Boolean = settingsManager.isGlobalModeEnabled
+
+    fun setGlobalModeEnabled(enabled: Boolean) { settingsManager.isGlobalModeEnabled = enabled }
 }

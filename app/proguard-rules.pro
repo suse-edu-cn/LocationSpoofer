@@ -23,6 +23,10 @@
 -keep class com.suseoaa.locationspoofer.utils.LSPosedManager { *; }
 -keep class com.suseoaa.locationspoofer.provider.** { *; }
 
+# libsu (Magisk root shell)
+-keep class com.topjohnwu.superuser.** { *; }
+-dontwarn com.topjohnwu.superuser.**
+
 # General safety for Android lifecycle
 -keep class * extends android.app.Application { *; }
 -keep class * extends android.app.Activity { *; }

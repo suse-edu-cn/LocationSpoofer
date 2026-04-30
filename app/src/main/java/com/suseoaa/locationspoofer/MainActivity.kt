@@ -1,13 +1,18 @@
 package com.suseoaa.locationspoofer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -15,10 +20,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LocationOff
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.suseoaa.locationspoofer.data.model.RoutePlanStage
 import com.suseoaa.locationspoofer.ui.screen.BlockingScreen
 import com.suseoaa.locationspoofer.ui.screen.FullScreenMapPage
@@ -36,7 +44,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        checkAndRequestPermissions()
+        // 悬浮窗权限（系统特殊权限，不走 requestPermissions 流程）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            )
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -50,57 +63,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    private fun checkAndRequestPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
-        val notGranted = permissions.filter {
-            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (notGranted.isNotEmpty()) {
-            requestPermissions(notGranted.toTypedArray(), 100)
-        } else {
-            // 如果已授予位置权限，检查后台位置权限 (Android 10+)
-            checkBackgroundLocation()
-        }
-
-        // 悬浮窗权限（特殊）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
-            val intent = android.content.Intent(
-                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                android.net.Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
-        }
-    }
-
-    private fun checkBackgroundLocation() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // Android 11+ 需要单独申请后台位置权限
-                requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), 101)
-            }
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100) {
-            // 检查是否已授予位置权限以触发后台位置权限请求
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                checkBackgroundLocation()
-            }
-        }
-    }
 }
 
 @Composable
@@ -109,10 +71,49 @@ fun MainScreen(
     uiState: com.suseoaa.locationspoofer.data.model.AppState,
     isDark: Boolean
 ) {
+    val context = LocalContext.current
     var isFullScreenMap by remember { mutableStateOf(false) }
 
+    // ---- 权限检查 ----
+    val requiredPermissions = buildList {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    fun hasAllPermissions() = requiredPermissions.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    var permissionsGranted by remember { mutableStateOf(hasAllPermissions()) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        permissionsGranted = results.values.all { it }
+        // 授权位置权限后，额外申请后台位置权限（Android 10+ 需单独申请）
+        if (permissionsGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                // 后台位置不阻塞主流程，静默发起
+            }
+        }
+    }
+
+    // 启动时自动发起权限申请
+    LaunchedEffect(Unit) {
+        if (!permissionsGranted) {
+            permissionLauncher.launch(requiredPermissions.toTypedArray())
+        }
+    }
+
+    // ---- 导航逻辑 ----
+
     fun closeFullScreenMap() {
-        // 退出全屏时，若处于选点或就绪阶段（未运行），重置路线规划状态
         if (uiState.routePlanStage == RoutePlanStage.SELECTING ||
             uiState.routePlanStage == RoutePlanStage.READY) {
             viewModel.cancelRoutePlanning()
@@ -120,10 +121,7 @@ fun MainScreen(
         isFullScreenMap = false
     }
 
-    // 拦截系统返回键：在全屏地图时返回主页，而不是退出应用
-    BackHandler(enabled = isFullScreenMap) {
-        closeFullScreenMap()
-    }
+    BackHandler(enabled = isFullScreenMap) { closeFullScreenMap() }
 
     AnimatedContent(
         targetState = isFullScreenMap,
@@ -141,6 +139,14 @@ fun MainScreen(
             )
         } else {
             when {
+                !permissionsGranted -> BlockingScreen(
+                    icon = Icons.Rounded.LocationOff,
+                    title = "需要位置权限",
+                    message = "本应用需要「精确位置」和「通知」权限才能运行。\n请点击系统弹窗中的「允许」，或前往设置手动开启。",
+                    isDark = isDark,
+                    onAction = { permissionLauncher.launch(requiredPermissions.toTypedArray()) },
+                    actionLabel = "重新申请权限"
+                )
                 uiState.isInitializing -> InitializingScreen(isDark)
                 !uiState.hasRootAccess -> BlockingScreen(
                     icon = Icons.Rounded.Lock,

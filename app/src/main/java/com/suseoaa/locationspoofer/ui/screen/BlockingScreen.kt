@@ -3,6 +3,7 @@ package com.suseoaa.locationspoofer.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material3.*
@@ -54,13 +55,27 @@ fun InitializingScreen(isDark: Boolean) {
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(28.dp)
             )
-            Text("正在初始化环境...", color = textSecondary, fontSize = 13.sp)
+            Text("正在请求 Root 授权...", color = textSecondary, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "首次运行请在 Magisk / KernelSU 中点击「允许」",
+                color = textSecondary,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
 
 @Composable
-fun BlockingScreen(icon: ImageVector, title: String, message: String, isDark: Boolean) {
+fun BlockingScreen(
+    icon: ImageVector,
+    title: String,
+    message: String,
+    isDark: Boolean,
+    onAction: (() -> Unit)? = null,
+    actionLabel: String = ""
+) {
     val textSecondary = AppColors.textSecondary(isDark)
 
     Box(
@@ -99,6 +114,15 @@ fun BlockingScreen(icon: ImageVector, title: String, message: String, isDark: Bo
                 lineHeight = 20.sp,
                 textAlign = TextAlign.Center
             )
+            if (onAction != null && actionLabel.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onAction,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(actionLabel, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }

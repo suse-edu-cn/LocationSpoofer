@@ -9,15 +9,17 @@ import android.net.Uri
 class SpooferProvider : ContentProvider() {
 
     companion object {
-        var isActive = false
-        var latitude = 0.0
-        var longitude = 0.0
-        var wifiJson = "[]"
-        var simMode = "STILL"
-        var simBearing = 0f
-        var startTimestamp = 0L
-        var routeJson = "[]"
-        var isRouteMode = false
+        @Volatile var isActive = false
+        @Volatile var latitude = 0.0
+        @Volatile var longitude = 0.0
+        @Volatile var wifiJson = "[]"
+        @Volatile var simMode = "STILL"
+        @Volatile var simBearing = 0f
+        @Volatile var startTimestamp = 0L
+        @Volatile var routeJson = "[]"
+        @Volatile var isRouteMode = false
+        /** 全局定位接管开关（true 时 Xposed 钩子覆盖所有应用） */
+        @Volatile var isGlobalMode = false
     }
 
     override fun onCreate(): Boolean = true

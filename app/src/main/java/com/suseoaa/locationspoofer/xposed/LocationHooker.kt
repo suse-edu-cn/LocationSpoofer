@@ -57,18 +57,36 @@ class LocationHooker : IXposedHookLoadPackage {
             return
         }
 
+        // 在应用加载时读取全局模式标志（一次性，快速 I/O）
+        val globalMode = readGlobalModeFromConfig()
+
         // 精确包名匹配 + 子进程前缀匹配（如 com.tencent.mm:appbrand0）
-        val isTarget = TARGET_PACKAGES.any { target ->
+        // 全局模式下跳过包名过滤，钩住所有应用
+        val isTarget = globalMode || TARGET_PACKAGES.any { target ->
             pkg == target || pkg.startsWith("$target:")
         }
 
         if (!isTarget) return
 
-        XposedBridge.log("[LocationSpoofer] Hooking package: $pkg")
+        XposedBridge.log("[LocationSpoofer] Hooking package: $pkg (global=$globalMode)")
 
         hookLocationAPIs(lpparam.classLoader)
         hookNetworkAndCellAPIs(lpparam.classLoader)
         hookBluetoothLE(lpparam.classLoader)
+    }
+
+    /**
+     * 从配置文件读取全局模式标志。
+     * 此方法在 handleLoadPackage 中调用，即每个应用进程启动时执行一次。
+     * 读取独立于 readConfig() 缓存之外，保证实时性。
+     */
+    private fun readGlobalModeFromConfig(): Boolean {
+        return try {
+            val file = java.io.File("/data/local/tmp/locationspoofer_config.json")
+            if (file.exists() && file.canRead()) {
+                org.json.JSONObject(file.readText()).optBoolean("is_global_mode", false)
+            } else false
+        } catch (e: Exception) { false }
     }
 
     private var startTimestamp = System.currentTimeMillis()
