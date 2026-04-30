@@ -44,7 +44,6 @@ import androidx.core.content.ContextCompat
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.LatLng
-import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.services.core.PoiItem
 import com.amap.api.services.poisearch.PoiSearch
 import com.suseoaa.locationspoofer.data.model.AppState
@@ -86,8 +85,8 @@ fun SpoofingScreen(
     var searchResults by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
     var showSearchResults by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
-    // 首页地图是否已被用户点击（控制确认选点按钮的显示）
-    var mapTapped by remember { mutableStateOf(false) }
+    // 首页小地图：记录摄像头中心点（用户拖动地图后更新，用于"确认选点"按钮）
+    var mapCenterCoord by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     // 拦截返回键：如果有搜索结果，按返回键先关闭搜索结果
     BackHandler(enabled = showSearchResults) {
@@ -217,31 +216,28 @@ fun SpoofingScreen(
                 val initLat = uiState.latitudeInput.toDoubleOrNull() ?: 39.9042
                 val initLng = uiState.longitudeInput.toDoubleOrNull() ?: 116.4074
                 map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(initLat, initLng), 15f))
-                // 点击地图显示确认选点按钮
-                map.setOnMapClickListener { latLng ->
-                    mapTapped = true
-                    map.clear()
-                    map.addMarker(MarkerOptions().position(latLng).title("选中位置"))
-                }
+                map.setOnCameraChangeListener(object : com.amap.api.maps.AMap.OnCameraChangeListener {
+                    override fun onCameraChange(pos: com.amap.api.maps.model.CameraPosition?) {}
+                    override fun onCameraChangeFinish(pos: com.amap.api.maps.model.CameraPosition?) {
+                        pos?.target?.let { t -> mapCenterCoord = Pair(t.latitude, t.longitude) }
+                    }
+                })
             }
 
-            // 十字准星（首次打开不显示按钮，点击地图后出现）
-            if (!mapTapped) {
+            // 常驻十字准星（非模拟状态下始终可见，指示地图中心即将确认的坐标）
+            if (!uiState.isSpoofingActive) {
                 Icon(
                     Icons.Rounded.AddLocationAlt, null,
-                    tint = AccentBlue.copy(alpha = 0.5f),
+                    tint = AccentBlue,
                     modifier = Modifier.align(Alignment.Center).size(32.dp)
                 )
-            }
-
-            // 确认选点按钮（点击地图后出现）
-            if (mapTapped) {
+                // 确认选点按钮（用户拖动地图后即可使用）
                 Button(
                     onClick = {
-                        smallMapRef?.cameraPosition?.target?.let { t ->
-                            viewModel.confirmMapPoint(t.latitude, t.longitude)
-                            mapTapped = false
-                            smallMapRef?.clear()
+                        val coord = mapCenterCoord
+                            ?: smallMapRef?.cameraPosition?.target?.let { Pair(it.latitude, it.longitude) }
+                        coord?.let { (lat, lng) ->
+                            viewModel.confirmMapPoint(lat, lng)
                             Toast.makeText(context, "已选定坐标", Toast.LENGTH_SHORT).show()
                         }
                     },

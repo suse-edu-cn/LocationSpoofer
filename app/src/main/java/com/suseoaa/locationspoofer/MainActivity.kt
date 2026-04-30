@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.suseoaa.locationspoofer.data.model.RoutePlanStage
 import com.suseoaa.locationspoofer.ui.screen.BlockingScreen
 import com.suseoaa.locationspoofer.ui.screen.FullScreenMapPage
 import com.suseoaa.locationspoofer.ui.screen.InitializingScreen
@@ -110,9 +111,18 @@ fun MainScreen(
 ) {
     var isFullScreenMap by remember { mutableStateOf(false) }
 
+    fun closeFullScreenMap() {
+        // 退出全屏时，若处于选点或就绪阶段（未运行），重置路线规划状态
+        if (uiState.routePlanStage == RoutePlanStage.SELECTING ||
+            uiState.routePlanStage == RoutePlanStage.READY) {
+            viewModel.cancelRoutePlanning()
+        }
+        isFullScreenMap = false
+    }
+
     // 拦截系统返回键：在全屏地图时返回主页，而不是退出应用
     BackHandler(enabled = isFullScreenMap) {
-        isFullScreenMap = false
+        closeFullScreenMap()
     }
 
     AnimatedContent(
@@ -127,7 +137,7 @@ fun MainScreen(
                 viewModel = viewModel,
                 uiState = uiState,
                 isDark = isDark,
-                onClose = { isFullScreenMap = false }
+                onClose = { closeFullScreenMap() }
             )
         } else {
             when {
@@ -135,7 +145,7 @@ fun MainScreen(
                 !uiState.hasRootAccess -> BlockingScreen(
                     icon = Icons.Rounded.Lock,
                     title = "需要 Root 权限",
-                    message = "本应用需要 KernelSU Root 权限才能运行。\n请在 KernelSU 中授权后重启应用。",
+                    message = "本应用需要 Root 权限才能运行。\n请在 KernelSU 或 Magisk 中授权后重启应用。",
                     isDark = isDark
                 )
                 !uiState.isLSPosedActive -> BlockingScreen(

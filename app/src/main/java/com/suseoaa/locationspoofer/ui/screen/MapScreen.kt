@@ -154,8 +154,8 @@ fun FullScreenMapPage(
             map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(initLat, initLng), 15f))
         }
 
-        // 选点模式的十字准星
-        if (stage == RoutePlanStage.SELECTING) {
+        // 十字准星：选点模式和 IDLE 模式（直接全屏选点）都显示
+        if (stage == RoutePlanStage.SELECTING || stage == RoutePlanStage.IDLE) {
             Icon(
                 Icons.Rounded.AddLocation, null,
                 tint = AccentBlue,
@@ -325,7 +325,14 @@ fun FullScreenMapPage(
             onFinishSelecting = { viewModel.finishSelectingPoints() },
             onRestartSelecting = { viewModel.restartSelectingPoints() },
             onStartPlanning = { showConfigDialog = true },
-            onStopRoute = { viewModel.stopRoutePlanning(); onClose() }
+            onStopRoute = { viewModel.stopRoutePlanning(); onClose() },
+            onConfirmSinglePoint = {
+                mapRef?.cameraPosition?.target?.let { t ->
+                    viewModel.confirmMapPoint(t.latitude, t.longitude)
+                    onClose()
+                }
+            },
+            onEnterRoutePlanning = { viewModel.enterRoutePlanning() }
         )
     }
 
@@ -421,7 +428,9 @@ private fun BottomActionBar(
     onFinishSelecting: () -> Unit,
     onRestartSelecting: () -> Unit,
     onStartPlanning: () -> Unit,
-    onStopRoute: () -> Unit
+    onStopRoute: () -> Unit,
+    onConfirmSinglePoint: () -> Unit = {},
+    onEnterRoutePlanning: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -436,7 +445,31 @@ private fun BottomActionBar(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         when (stage) {
-            RoutePlanStage.IDLE -> { /* 不显示 */ }
+            RoutePlanStage.IDLE -> {
+                // 直接通过"全屏选点"进入时，提供单点确认和进入路线规划两个入口
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onConfirmSinglePoint,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+                    ) {
+                        Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("确认选点", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = onEnterRoutePlanning,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                    ) {
+                        Icon(Icons.Rounded.Route, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("路线规划", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
             RoutePlanStage.SELECTING -> {
                 Text(

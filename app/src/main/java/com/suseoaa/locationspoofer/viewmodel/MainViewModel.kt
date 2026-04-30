@@ -17,6 +17,7 @@ import com.suseoaa.locationspoofer.data.repository.SettingsRepository
 import com.suseoaa.locationspoofer.data.repository.WifiRepository
 import com.suseoaa.locationspoofer.provider.SpooferProvider
 import com.suseoaa.locationspoofer.service.SpoofingService
+import com.suseoaa.locationspoofer.utils.CoordinateConverter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -123,16 +124,18 @@ class MainViewModel(
 
     fun startSpoofing() {
         val state = _uiState.value
-        val lng = state.longitudeInput.toDoubleOrNull()
-        val lat = state.latitudeInput.toDoubleOrNull()
-        if (lng == null || lat == null || lng !in -180.0..180.0 || lat !in -90.0..90.0) {
+        val gcjLng = state.longitudeInput.toDoubleOrNull()
+        val gcjLat = state.latitudeInput.toDoubleOrNull()
+        if (gcjLng == null || gcjLat == null || gcjLng !in -180.0..180.0 || gcjLat !in -90.0..90.0) {
             _uiState.update { it.copy(showCoordinateError = true) }
             return
         }
+        // UI 存储的是 GCJ-02，写入 SpooferProvider 前转换为 WGS-84
+        val (wgsLat, wgsLng) = CoordinateConverter.gcj02ToWgs84(gcjLat, gcjLng)
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             locationRepository.startSpoofing(
-                context, lat, lng,
+                context, wgsLat, wgsLng,
                 "STILL", 0f, now,
                 emptyList(), false
             )
@@ -143,7 +146,7 @@ class MainViewModel(
                     wifiApCount = 0
                 )
             }
-            val wifiJson = wifiRepository.fetchWifiData(lat, lng, wigleToken)
+            val wifiJson = wifiRepository.fetchWifiData(gcjLat, gcjLng, wigleToken)
             val apCount = try { org.json.JSONArray(wifiJson).length() } catch (e: Exception) { 0 }
             locationRepository.updateWifiJson(wifiJson)
             _uiState.update { it.copy(wifiLoadStatus = WifiLoadStatus.DONE, wifiApCount = apCount) }
@@ -196,9 +199,10 @@ class MainViewModel(
                 showCoordinateError = false
             )
         }
-        // 实时同步给 SpooferProvider
-        SpooferProvider.latitude = newLat
-        SpooferProvider.longitude = newLng
+        // 摇杆计算结果仍是 GCJ-02 偏移，写入 Provider 前转换
+        val (wgsLat, wgsLng) = CoordinateConverter.gcj02ToWgs84(newLat, newLng)
+        SpooferProvider.latitude = wgsLat
+        SpooferProvider.longitude = wgsLng
         SpooferProvider.simBearing = bearing.toFloat()
         SpooferProvider.startTimestamp = System.currentTimeMillis()
     }
@@ -210,6 +214,18 @@ class MainViewModel(
         _uiState.update {
             it.copy(
                 routePlanStage = RoutePlanStage.SELECTING,
+                routePoints = emptyList()
+            )
+        }
+    }
+
+    /** 取消路线规划，回到 IDLE（不停止正在运行的 spoofing 服务） */
+    fun cancelRoutePlanning() {
+        autoRouteJob?.cancel()
+        autoRouteJob = null
+        _uiState.update {
+            it.copy(
+                routePlanStage = RoutePlanStage.IDLE,
                 routePoints = emptyList()
             )
         }
@@ -266,7 +282,7 @@ class MainViewModel(
         else state.routeSimMode.speedMs
     }
 
-    /** 首页地图确认选点 */
+    /** 首页地图确认选点（GCJ-02 坐标，仅存入 UI State 用于显示） */
     fun confirmMapPoint(lat: Double, lng: Double) {
         _uiState.update {
             it.copy(
@@ -302,20 +318,19 @@ class MainViewModel(
         }
 
         val isLoop = state.routeRunMode == RouteRunMode.LOOP
+        // 路线点 GCJ-02 → WGS-84（供 SpoofingService 的 routeJson 使用）
+        val wgsRoutePoints = state.routePoints.map { p ->
+            val (wLat, wLng) = CoordinateConverter.gcj02ToWgs84(p.lat, p.lng)
+            RoutePoint(wLat, wLng)
+        }
+        val (wgsStartLat, wgsStartLng) = CoordinateConverter.gcj02ToWgs84(startPoint.lat, startPoint.lng)
 
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            val routePoints = if (isLoop) {
-                // 循环路线不需要追加起点，由 autoRouteLoop 自行处理往返
-                state.routePoints
-            } else {
-                state.routePoints
-            }
-
             locationRepository.startSpoofing(
-                context, startPoint.lat, startPoint.lng,
+                context, wgsStartLat, wgsStartLng,
                 if (isLoop) state.routeSimMode.name else "STILL",
-                0f, now, routePoints, isLoop
+                0f, now, wgsRoutePoints, isLoop
             )
             _uiState.update {
                 it.copy(
@@ -333,7 +348,6 @@ class MainViewModel(
         if (isLoop) {
             startAutoRouteLoop()
         }
-        // 手动模式不需要 sync loop，由摇杆直接驱动
     }
 
     /** 停止路线模拟，重置所有状态 */
@@ -386,7 +400,7 @@ class MainViewModel(
     /**
      * 循环模式自动移动。
      * 按路点顺序移动，到终点后反向，不断循环。
-     * 同时实时同步坐标到 SpooferProvider。
+     * 同时实时同步坐标到 SpooferProvider（GCJ-02 → WGS-84）。
      */
     private fun startAutoRouteLoop() {
         autoRouteJob?.cancel()
@@ -401,7 +415,7 @@ class MainViewModel(
             val tickSec = tickMs / 1000.0
             var forward = true
             var segmentIndex = 0
-            var progress = 0.0 // 当前段上已走过的距离（米）
+            var progress = 0.0
 
             while (isActive) {
                 val fromIdx = if (forward) segmentIndex else segmentIndex + 1
@@ -414,12 +428,10 @@ class MainViewModel(
                 progress += stepDist
 
                 if (progress >= segLen) {
-                    // 到达当前段终点
                     progress -= segLen
                     if (forward) {
                         segmentIndex++
                         if (segmentIndex >= points.lastIndex) {
-                            // 到达终点，反向
                             forward = false
                             segmentIndex = points.lastIndex - 1
                             progress = 0.0
@@ -427,17 +439,14 @@ class MainViewModel(
                     } else {
                         segmentIndex--
                         if (segmentIndex < 0) {
-                            // 回到起点，正向
                             forward = true
                             segmentIndex = 0
                             progress = 0.0
                         }
                     }
-                    // 重新获取段信息并继续
                     val newFrom = if (forward) points[segmentIndex] else points[segmentIndex + 1]
                     updatePosition(newFrom.lat, newFrom.lng, 0f)
                 } else {
-                    // 在段中间插值
                     val ratio = if (segLen > 0) progress / segLen else 0.0
                     val lat = from.lat + (to.lat - from.lat) * ratio
                     val lng = from.lng + (to.lng - from.lng) * ratio
@@ -450,18 +459,19 @@ class MainViewModel(
         }
     }
 
-    /** 更新当前模拟位置到 UI 和 SpooferProvider */
-    private fun updatePosition(lat: Double, lng: Double, bearing: Float) {
+    /** 更新当前模拟位置到 UI（GCJ-02）和 SpooferProvider（WGS-84） */
+    private fun updatePosition(gcjLat: Double, gcjLng: Double, bearing: Float) {
         _uiState.update {
             it.copy(
-                latitudeInput = String.format("%.6f", lat),
-                longitudeInput = String.format("%.6f", lng),
+                latitudeInput = String.format("%.6f", gcjLat),
+                longitudeInput = String.format("%.6f", gcjLng),
                 simBearing = bearing,
                 showCoordinateError = false
             )
         }
-        SpooferProvider.latitude = lat
-        SpooferProvider.longitude = lng
+        val (wgsLat, wgsLng) = CoordinateConverter.gcj02ToWgs84(gcjLat, gcjLng)
+        SpooferProvider.latitude = wgsLat
+        SpooferProvider.longitude = wgsLng
         SpooferProvider.simBearing = bearing
         SpooferProvider.startTimestamp = System.currentTimeMillis()
     }
