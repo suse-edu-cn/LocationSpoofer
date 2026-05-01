@@ -64,6 +64,68 @@ class RootManager {
         ).exec().isSuccess
     }
 
+    /**
+     * 禁用系统网络定位提供者(NLP)，防止基站定位覆盖模拟GPS位置。
+     * 在模拟定位启动时调用。
+     */
+    suspend fun disableNlp(): Boolean = withContext(Dispatchers.IO) {
+        val nlpPackages = listOf(
+            "com.google.android.gms.location.nlp",
+            "com.google.android.location",
+            "com.amap.android.location",
+            "com.amap.android.ams",
+            "com.baidu.map.location",
+            "com.tencent.android.location",
+            "com.huawei.lbs",
+            "com.huawei.location",
+            "com.xiaomi.metoknlp",
+            "com.coloros.pcmcs",
+            "com.coloros.location",
+            "com.oplus.location",
+            "com.vivo.lbs"
+        )
+        val disableCmds = nlpPackages.map { "pm disable-user --user 0 $it 2>/dev/null || pm disable $it 2>/dev/null || true" }
+        Shell.cmd(
+            "settings put secure location_mode 1",
+            "settings put secure location_providers_allowed gps",
+            "settings put global assisted_gps_enabled 0",
+            "settings put global location_accuracy_enabled 0 2>/dev/null || true",
+            "settings put secure enhanced_location_accuracy 0 2>/dev/null || true",
+            *disableCmds.toTypedArray()
+        ).exec().isSuccess
+    }
+
+    /**
+     * 恢复系统网络定位提供者(NLP)。
+     * 在模拟定位停止时调用。
+     */
+    suspend fun restoreNlp(): Boolean = withContext(Dispatchers.IO) {
+        val nlpPackages = listOf(
+            "com.google.android.gms.location.nlp",
+            "com.google.android.location",
+            "com.amap.android.location",
+            "com.amap.android.ams",
+            "com.baidu.map.location",
+            "com.tencent.android.location",
+            "com.huawei.lbs",
+            "com.huawei.location",
+            "com.xiaomi.metoknlp",
+            "com.coloros.pcmcs",
+            "com.coloros.location",
+            "com.oplus.location",
+            "com.vivo.lbs"
+        )
+        val enableCmds = nlpPackages.map { "pm enable $it 2>/dev/null || true" }
+        Shell.cmd(
+            "settings put secure location_mode 3",
+            "settings put secure location_providers_allowed +network",
+            "settings put global assisted_gps_enabled 1",
+            "settings put global location_accuracy_enabled 1 2>/dev/null || true",
+            "settings put secure enhanced_location_accuracy 1 2>/dev/null || true",
+            *enableCmds.toTypedArray()
+        ).exec().isSuccess
+    }
+
     suspend fun disableFakeAirplaneMode(): Boolean = withContext(Dispatchers.IO) {
         Shell.cmd(
             "settings put global airplane_mode_radios \"cell,bluetooth,wifi,nfc,wimax\"",

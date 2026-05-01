@@ -18,6 +18,9 @@ import java.util.ArrayList
 class LocationHooker : IXposedHookLoadPackage {
 
     companion object {
+        init {
+            XposedBridge.log("[LocationSpoofer] ★★★ LocationHooker CLASS LOADED ★★★")
+        }
         // 需要注入的目标应用包名（含前缀匹配，覆盖所有子进程如 :appbrand0, :tools 等）
         val TARGET_PACKAGES = setOf(
             "com.tencent.mm",           // 微信（含所有 :appbrand 小程序子进程）
@@ -61,6 +64,7 @@ class LocationHooker : IXposedHookLoadPackage {
 
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
         val pkg = lpparam.packageName
+        XposedBridge.log("[LocationSpoofer] handleLoadPackage: $pkg pid=${android.os.Process.myPid()}")
 
         // 宿主App自报平安，并允许被Hook定位（解决软件内无法定位到当前位置的问题）
         if (pkg == "com.suseoaa.locationspoofer") {
@@ -88,12 +92,13 @@ class LocationHooker : IXposedHookLoadPackage {
         val hookAllPackages = globalMode || configActive
 
         // 系统进程：必须提前安装底层位置钩子，避免后续漏拦真实位置
-        // 注意：不要在系统进程挂钩网络和基站，否则会导致系统蜂窝网络和数据连接断开，进而引发鉴权失败等问题。
         if (SYSTEM_PACKAGES.contains(pkg)) {
+            XposedBridge.log("[LocationSpoofer] ★★★ SYSTEM PROCESS DETECTED: $pkg, installing hooks ★★★")
             val useGcj = false
             hookLocationAPIs(lpparam.classLoader, useGcj)
             hookLocationManagerOverrides(lpparam.classLoader, useGcj)
             hookSystemLocationService(lpparam.classLoader, useGcj)
+            XposedBridge.log("[LocationSpoofer] ★★★ System process hooks installed for: $pkg ★★★")
             return
         }
 
@@ -115,6 +120,11 @@ class LocationHooker : IXposedHookLoadPackage {
         hookAMapListeners(lpparam.classLoader, useGcj)
         hookNetworkAndCellAPIs(lpparam.classLoader)
         hookBluetoothLE(lpparam.classLoader)
+
+        // GMS 专属：拦截 FusedLocationProviderClient，防止真实网络定位覆盖模拟GPS
+        if (pkg == "com.google.android.gms") {
+            hookGmsFusedLocation(lpparam.classLoader, useGcj)
+        }
     }
 
     private fun isGcjPackage(pkg: String): Boolean {
@@ -231,20 +241,46 @@ class LocationHooker : IXposedHookLoadPackage {
         }
     }
 
-    // ★ 路径三：系统级真实位置上报阻断
+    // ★ 路径三：系统级全局位置劫持
+    // 核心策略：在 LocationManagerService 层彻底阻断网络定位提供者的位置上报。
+    // 当模拟激活时，NLP 的所有 reportLocation 调用直接 return，不传递给任何消费者。
+    // GPS 位置由 SpoofingService 通过 setTestProviderLocation 注入（独立通道，不经过 reportLocation），
+    // FusedLocationProvider 只能看到模拟的 GPS 位置，无法获取真实基站定位。
     private fun hookSystemLocationService(classLoader: ClassLoader, useGcj: Boolean) {
         val locationResultClass = findClassIfExists("android.location.LocationResult", classLoader)
+
+        // ★ 核心 hook：阻断 network/fused 提供者的位置上报
         val reportHook = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val config = readConfig()
-                if (config == null || !config.optBoolean("active", false)) return
+                val active = config?.optBoolean("active", false) ?: false
 
+                // 诊断日志：每次 reportLocation 被调用时打印
+                var providerInfo = "unknown"
                 param.args?.forEach { arg ->
-                    when {
-                        arg is Location -> modifyLocationObjectFields(arg, config, useGcj)
-                        locationResultClass != null && arg != null && locationResultClass.isInstance(arg) ->
-                            modifyLocationResult(arg, config, useGcj)
+                    if (arg is Location) {
+                        providerInfo = arg.provider ?: "null"
                     }
+                }
+                XposedBridge.log("[LocationSpoofer] reportLocation called: provider=$providerInfo active=$active config=${config != null}")
+
+                if (config == null || !active) return
+
+                // 检查是否是 network/fused 提供者的位置上报
+                var shouldBlock = false
+                param.args?.forEach { arg ->
+                    if (arg is Location) {
+                        val provider = arg.provider ?: ""
+                        if (provider != "gps" && !provider.contains("test", ignoreCase = true)) {
+                            shouldBlock = true
+                        }
+                    }
+                }
+
+                // 彻底阻断：直接返回，不调用原始方法
+                // 这样 NLP 的真实位置永远不会到达 FusedLocationProvider
+                if (shouldBlock) {
+                    param.result = null
                 }
             }
         }
@@ -256,9 +292,9 @@ class LocationHooker : IXposedHookLoadPackage {
             )
             if (providerManagerClass != null) {
                 XposedBridge.hookAllMethods(providerManagerClass, "onReportLocation", reportHook)
+                XposedBridge.log("[LocationSpoofer] Hooked LocationProviderManager.onReportLocation")
             }
         } catch (e: Throwable) {
-            // Android版本差异可能导致类或方法不存在，静默处理
         }
 
         try {
@@ -268,7 +304,210 @@ class LocationHooker : IXposedHookLoadPackage {
             )
             if (locationManagerServiceClass != null) {
                 XposedBridge.hookAllMethods(locationManagerServiceClass, "reportLocation", reportHook)
+                XposedBridge.log("[LocationSpoofer] Hooked LocationManagerService.reportLocation")
             }
+        } catch (e: Throwable) {
+        }
+
+        // ★ 拦截 getLastKnownLocation：网络提供者返回 null，GPS 返回模拟位置
+        try {
+            val lmClass = XposedHelpers.findClass("android.location.LocationManager", classLoader)
+            XposedHelpers.findAndHookMethod(
+                lmClass, "getLastKnownLocation", String::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config == null || !config.optBoolean("active", false)) return
+                        val provider = param.args[0] as? String ?: ""
+                        if (provider == "network" || provider == "fused") {
+                            // 网络/融合提供者：返回 null，强制系统使用 GPS
+                            param.result = null
+                        } else if (provider == "gps" || provider.contains("test", ignoreCase = true)) {
+                            param.result = buildFakeLocation(config, "gps", useGcj)
+                        }
+                    }
+                }
+            )
+            XposedHelpers.findAndHookMethod(
+                lmClass, "getLastLocation",
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config == null || !config.optBoolean("active", false)) return
+                        param.result = buildFakeLocation(config, "gps", useGcj)
+                    }
+                }
+            )
+        } catch (e: Throwable) {
+        }
+
+        // ★ 阻断 NLP 基站扫描：所有基站相关 API 返回空
+        try {
+            val emptyCellHook = object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val config = readConfig()
+                    if (config != null && config.optBoolean("active", false)) {
+                        param.result = java.util.ArrayList<Any>()
+                    }
+                }
+            }
+            val telephonyManagerClass = XposedHelpers.findClass(
+                "android.telephony.TelephonyManager", classLoader
+            )
+            XposedBridge.hookAllMethods(telephonyManagerClass, "getAllCellInfo", emptyCellHook)
+            XposedBridge.hookAllMethods(telephonyManagerClass, "getCellLocation", emptyCellHook)
+            XposedBridge.hookAllMethods(telephonyManagerClass, "getNeighboringCellInfo", emptyCellHook)
+            XposedBridge.log("[LocationSpoofer] Hooked TelephonyManager cell APIs in system process")
+        } catch (e: Throwable) {
+        }
+
+        // ★ 阻断网络位置提供者启用/注册
+        try {
+            val locationManagerServiceClass = findClassIfExists(
+                "com.android.server.location.LocationManagerService",
+                classLoader
+            )
+            if (locationManagerServiceClass != null) {
+                // 拦截 setTestProviderEnabled，防止网络提供者被启用
+                XposedBridge.hookAllMethods(locationManagerServiceClass, "setTestProviderEnabled",
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val config = readConfig()
+                            if (config == null || !config.optBoolean("active", false)) return
+                            // 允许 test provider（我们的模拟），阻止 network provider
+                            val provider = param.args?.getOrNull(0) as? String ?: return
+                            if (provider == "network") {
+                                param.result = null
+                            }
+                        }
+                    }
+                )
+            }
+        } catch (e: Throwable) {
+        }
+    }
+
+    /**
+     * ★ GMS 专属：全面拦截 FusedLocationProviderClient
+     * GMS 内部的 FusedLocationProvider 会融合 GPS 和网络定位结果，
+     * 在回调层面拦截确保应用最终收到的一定是模拟位置。
+     */
+    private fun hookGmsFusedLocation(classLoader: ClassLoader, useGcj: Boolean) {
+        // 1. Hook LocationCallback.onLocationResult —— 最终兜底
+        val locationCallbackClass = findClassIfExists(
+            "com.google.android.gms.location.LocationCallback", classLoader
+        )
+
+        if (locationCallbackClass != null) {
+            try {
+                val locationResultClass = findClassIfExists(
+                    "com.google.android.gms.location.LocationResult", classLoader
+                )
+                if (locationResultClass != null) {
+                    XposedHelpers.findAndHookMethod(
+                        locationCallbackClass,
+                        "onLocationResult",
+                        locationResultClass,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val config = readConfig()
+                                if (config == null || !config.optBoolean("active", false)) return
+                                modifyGmsLocationResult(param.args[0], config, useGcj)
+                            }
+                        }
+                    )
+                }
+            } catch (e: Throwable) {
+            }
+        }
+
+        // 2. Hook FusedLocationProviderClient.requestLocationUpdates —— 代理回调
+        try {
+            val gmsFusedClass = findClassIfExists(
+                "com.google.android.gms.location.FusedLocationProviderClient", classLoader
+            )
+            if (gmsFusedClass != null && locationCallbackClass != null) {
+                val requestHook = object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config == null || !config.optBoolean("active", false)) return
+
+                        for (i in param.args.indices) {
+                            val arg = param.args[i]
+                            if (arg != null && locationCallbackClass.isAssignableFrom(arg.javaClass)) {
+                                val originalCallback = arg
+                                val proxy = Proxy.newProxyInstance(
+                                    classLoader,
+                                    arrayOf(locationCallbackClass),
+                                    InvocationHandler { _, method, args ->
+                                        if (method.name == "onLocationResult" && args != null && args.isNotEmpty()) {
+                                            modifyGmsLocationResult(args[0], config, useGcj)
+                                        }
+                                        method.invoke(originalCallback, *(args ?: emptyArray()))
+                                    }
+                                )
+                                param.args[i] = proxy
+                            }
+                        }
+                    }
+                }
+
+                for (method in gmsFusedClass.declaredMethods) {
+                    if (method.name == "requestLocationUpdates") {
+                        XposedBridge.hookMethod(method, requestHook)
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+        }
+
+        // 3. Hook getLastLocation / getCurrentLocation —— 拦截单次请求
+        try {
+            val gmsFusedClass = findClassIfExists(
+                "com.google.android.gms.location.FusedLocationProviderClient", classLoader
+            )
+            if (gmsFusedClass != null) {
+                val singleRequestHook = object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config == null || !config.optBoolean("active", false)) return
+                        // 不阻断原始调用，在 afterHook 中篡改 Task 内的结果
+                    }
+
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config == null || !config.optBoolean("active", false)) return
+                        try {
+                            val task = param.result ?: return
+                            // Task 可能还未完成，添加 SuccessListener 来篡改结果
+                            // 但对于已完成的 Task，直接篡改 getResult 返回的 Location
+                            val result = XposedHelpers.callMethod(task, "getResult")
+                            if (result is Location) {
+                                modifyLocationObjectFields(result, config, useGcj)
+                            }
+                        } catch (e: Throwable) {
+                        }
+                    }
+                }
+
+                for (method in gmsFusedClass.declaredMethods) {
+                    when (method.name) {
+                        "getLastLocation", "getCurrentLocation" -> {
+                            XposedBridge.hookMethod(method, singleRequestHook)
+                        }
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+        }
+    }
+
+    private fun modifyGmsLocationResult(locationResult: Any?, config: JSONObject, useGcj: Boolean) {
+        try {
+            if (locationResult == null) return
+            @Suppress("UNCHECKED_CAST")
+            val locations = XposedHelpers.callMethod(locationResult, "getLocations") as? List<Location>
+            locations?.forEach { loc -> modifyLocationObjectFields(loc, config, useGcj) }
         } catch (e: Throwable) {
         }
     }
@@ -1962,9 +2201,14 @@ class LocationHooker : IXposedHookLoadPackage {
                 if (!config.has("cell_json")) config.put("cell_json", org.json.JSONArray())
                 lastConfig = config
                 lastReadTime = currentTime
+                XposedBridge.log("[LocationSpoofer] readConfig via FILE: active=${config.optBoolean("active")} lat=${config.optDouble("lat")} lng=${config.optDouble("lng")} app=${app?.packageName ?: "null"}")
                 config
-            } else null
+            } else {
+                XposedBridge.log("[LocationSpoofer] readConfig: FILE NOT FOUND or NOT READABLE: ${file.absolutePath} exists=${file.exists()}")
+                null
+            }
         } catch (e: Exception) {
+            XposedBridge.log("[LocationSpoofer] readConfig EXCEPTION: ${e.message}")
             null
         }
     }

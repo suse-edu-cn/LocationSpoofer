@@ -1,0 +1,33 @@
+#!/sbin/sh
+OUTFD=$2
+ZIPFILE=$3
+
+ui_print() {
+  echo -n -e "ui_print $1\nui_print\n" >&$OUTFD
+}
+
+ui_print "***********************************"
+ui_print "   Anti-NLP Spoof Module v1.0     "
+ui_print "  Disable Network Location Provider"
+ui_print "***********************************"
+
+if [ -z "$MODPATH" ]; then
+  ui_print "! Please install from Magisk or KernelSU App."
+  exit 1
+fi
+
+ui_print "- Extracting files..."
+unzip -o "$ZIPFILE" module.prop -d "$MODPATH" >&2
+unzip -o "$ZIPFILE" service.sh -d "$MODPATH" >&2
+unzip -o "$ZIPFILE" uninstall.sh -d "$MODPATH" >&2
+
+ui_print "- Setting permissions..."
+chmod 755 "$MODPATH/service.sh"
+chmod 755 "$MODPATH/uninstall.sh"
+
+ui_print "- Installation complete."
+ui_print "- Network Location Provider will be disabled on reboot."
+ui_print "- GPS-only mode will be enforced."
+ui_print ""
+ui_print "- Please reboot your device."
+exit 0

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="xposed_scope">
+        <!-- System processes -->
+        <item>android</item>
+        <item>com.android.phone</item>
+        <!-- GMS (FusedLocationProvider) -->
+        <item>com.google.android.gms</item>
+        <!-- Messaging/social -->
+        <item>com.tencent.mm</item>
+        <item>com.chaoxing.mobile</item>
+        <item>cn.chaoxing.lemon</item>
+        <item>com.alibaba.android.rimet</item>
+        <!-- Maps/transport -->
+        <item>com.sankuai.meituan</item>
+        <item>com.baidu.BaiduMap</item>
+        <item>com.autonavi.minimap</item>
+        <item>com.tencent.map</item>
+        <!-- SystemUI -->
+        <item>com.android.systemui</item>
+        <!-- NLP/location SDKs -->
+        <item>com.amap.android.location</item>
+        <item>com.amap.android.ams</item>
+        <item>com.baidu.map.location</item>
+        <item>com.tencent.android.location</item>
+        <!-- OEM location -->
+        <item>com.huawei.lbs</item>
+        <item>com.huawei.location</item>
+        <item>com.xiaomi.metoknlp</item>
+        <item>com.coloros.pcmcs</item>
+        <item>com.coloros.location</item>
+        <item>com.oplus.location</item>
+        <item>com.vivo.lbs</item>
+        <!-- Other common apps -->
+        <item>com.qualcomm.location</item>
+        <item>com.mediatek.location</item>
+    </string-array>
+</resources>

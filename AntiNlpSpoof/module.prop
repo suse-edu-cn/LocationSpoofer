@@ -1,0 +1,6 @@
+id=anti_nlp_spoof
+name=Anti-NLP Spoof (Disable Network Location)
+version=1.0
+versionCode=1
+author=SUSE-OAA
+description=Disables Android Network Location Provider (NLP) at system level to prevent cell-based location from overriding GPS spoofing. Compatible with Magisk and KernelSU.

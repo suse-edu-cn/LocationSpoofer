@@ -43,6 +43,7 @@ class LocationRepository(
 
         configManager.saveConfig(lat, lng, true, simMode, simBearing, startTime, routePoints, isRouteMode)
         rootManager.grantMockLocation()
+        rootManager.disableNlp()
 
         context.startForegroundService(
             Intent(context, SpoofingService::class.java).apply {
@@ -64,6 +65,7 @@ class LocationRepository(
             action = SpoofingService.ACTION_STOP
         })
         rootManager.revokeMockLocation()
+        rootManager.restoreNlp()
     }
 
     suspend fun updateConfig(
