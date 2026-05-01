@@ -87,6 +87,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          WIGLE_TOKEN: ${{ secrets.WIGLE_TOKEN }}
+          AMAP_API_KEY: ${{ secrets.AMAP_API_KEY }}
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleRelease
