@@ -1,0 +1,6 @@
+id=fake_airplane_mode
+name=Fake Airplane Mode (Keep Radios On)
+version=1.0
+versionCode=1
+author=Gemini
+description=Modifies airplane_mode_radios to keep Cellular and Wi-Fi active even when Airplane Mode is turned on. Ideal for location spoofing under cell tower interference.

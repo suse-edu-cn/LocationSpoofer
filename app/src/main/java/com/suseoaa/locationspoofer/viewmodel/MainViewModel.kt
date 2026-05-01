@@ -1,10 +1,18 @@
 package com.suseoaa.locationspoofer.viewmodel
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.amap.api.location.AMapLocationClient
-import com.amap.api.location.AMapLocationClientOption
 import com.suseoaa.locationspoofer.data.model.AppState
 import com.suseoaa.locationspoofer.data.model.RoutePoint
 import com.suseoaa.locationspoofer.data.model.RoutePlanStage
@@ -12,6 +20,7 @@ import com.suseoaa.locationspoofer.data.model.RouteRunMode
 import com.suseoaa.locationspoofer.data.model.SavedLocation
 import com.suseoaa.locationspoofer.data.model.SimMode
 import com.suseoaa.locationspoofer.data.model.WifiLoadStatus
+import com.suseoaa.locationspoofer.data.repository.CellRepository
 import com.suseoaa.locationspoofer.data.repository.LocationRepository
 import com.suseoaa.locationspoofer.data.repository.SettingsRepository
 import com.suseoaa.locationspoofer.data.repository.WifiRepository
@@ -32,6 +41,7 @@ class MainViewModel(
     private val locationRepository: LocationRepository,
     private val settingsRepository: SettingsRepository,
     private val wifiRepository: WifiRepository,
+    private val cellRepository: CellRepository,
     private val context: Context
 ) : ViewModel() {
 
@@ -64,6 +74,7 @@ class MainViewModel(
 
             // 恢复持久化的全局模式状态
             val globalMode = settingsRepository.isGlobalModeEnabled()
+            val fakeAirplane = settingsRepository.isFakeAirplaneModeEnabled()
             SpooferProvider.isGlobalMode = globalMode
 
             _uiState.update {
@@ -73,7 +84,8 @@ class MainViewModel(
                     isLSPosedActive = lsposed,
                     isSpoofingActive = false,
                     routePlanStage = RoutePlanStage.IDLE,
-                    isGlobalModeEnabled = globalMode
+                    isGlobalModeEnabled = globalMode,
+                    isFakeAirplaneModeEnabled = fakeAirplane
                 )
             }
             fetchCurrentLocation(context)
@@ -98,31 +110,139 @@ class MainViewModel(
     // 当前位置获取
 
     fun fetchCurrentLocation(ctx: Context) {
-        val client = try {
-            AMapLocationClient(ctx.applicationContext)
-        } catch (e: Exception) {
+        requestSystemLocation(ctx, onlyIfEmpty = true, onResult = null, onError = null)
+    }
+
+    fun requestCurrentLocation(
+        ctx: Context,
+        onLocated: (Double, Double) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        requestSystemLocation(ctx, onlyIfEmpty = false, onResult = onLocated, onError = onError)
+    }
+
+    private fun requestSystemLocation(
+        ctx: Context,
+        onlyIfEmpty: Boolean,
+        onResult: ((Double, Double) -> Unit)?,
+        onError: ((String) -> Unit)?
+    ) {
+        if (!hasLocationPermission(ctx)) {
+            onError?.invoke("未授予定位权限")
             return
         }
-        client.setLocationOption(AMapLocationClientOption().apply {
-            locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-            isOnceLocation = true
-        })
-        client.setLocationListener { loc ->
-            if (loc != null && loc.errorCode == 0) {
-                if (_uiState.value.longitudeInput.isEmpty() || _uiState.value.latitudeInput.isEmpty()) {
-                    _uiState.update {
-                        it.copy(
-                            latitudeInput = String.format("%.6f", loc.latitude),
-                            longitudeInput = String.format("%.6f", loc.longitude),
-                            showCoordinateError = false
-                        )
-                    }
+
+        val locationManager = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        if (locationManager == null) {
+            onError?.invoke("定位服务不可用")
+            return
+        }
+
+        val providers = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        )
+
+        val lastKnown = providers.mapNotNull { provider ->
+            try {
+                if (locationManager.isProviderEnabled(provider)) {
+                    locationManager.getLastKnownLocation(provider)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }.maxByOrNull { it.time }
+
+        if (lastKnown != null) {
+            handleLocationUpdate(lastKnown, onlyIfEmpty, onResult)
+            return
+        }
+
+        val provider = providers.firstOrNull { p ->
+            try {
+                locationManager.isProviderEnabled(p)
+            } catch (e: Exception) {
+                false
+            }
+        }
+        if (provider == null) {
+            onError?.invoke("定位服务未开启")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val executor = ContextCompat.getMainExecutor(ctx)
+            locationManager.getCurrentLocation(provider, CancellationSignal(), executor) { loc ->
+                if (loc != null) {
+                    handleLocationUpdate(loc, onlyIfEmpty, onResult)
+                } else {
+                    onError?.invoke("无法获取当前位置")
                 }
             }
-            client.stopLocation()
-            client.onDestroy()
+            return
         }
-        client.startLocation()
+
+        val listener = object : LocationListener {
+            override fun onLocationChanged(loc: Location) {
+                locationManager.removeUpdates(this)
+                handleLocationUpdate(loc, onlyIfEmpty, onResult)
+            }
+
+            override fun onProviderEnabled(provider: String) = Unit
+
+            override fun onProviderDisabled(provider: String) = Unit
+
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+        }
+
+        try {
+            @Suppress("DEPRECATION")
+            locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            onError?.invoke("无定位权限")
+        } catch (e: Exception) {
+            onError?.invoke("无法获取当前位置")
+        }
+    }
+
+    private fun handleLocationUpdate(
+        location: Location,
+        onlyIfEmpty: Boolean,
+        onResult: ((Double, Double) -> Unit)?
+    ) {
+        val provider = location.provider ?: ""
+        val (displayLat, displayLng) = if (provider == LocationManager.GPS_PROVIDER) {
+            CoordinateConverter.wgs84ToGcj02(location.latitude, location.longitude)
+        } else {
+            Pair(location.latitude, location.longitude)
+        }
+
+        if (!onlyIfEmpty || _uiState.value.longitudeInput.isEmpty() || _uiState.value.latitudeInput.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    latitudeInput = String.format("%.6f", displayLat),
+                    longitudeInput = String.format("%.6f", displayLng),
+                    showCoordinateError = false
+                )
+            }
+        }
+
+        onResult?.invoke(displayLat, displayLng)
+    }
+
+    private fun hasLocationPermission(ctx: Context): Boolean {
+        val fine = ContextCompat.checkSelfPermission(
+            ctx,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            ctx,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
     }
 
     // 坐标输入
@@ -169,6 +289,11 @@ class MainViewModel(
             val wifiJson = wifiRepository.fetchWifiData(gcjLat, gcjLng, wigleToken)
             val apCount = try { org.json.JSONArray(wifiJson).length() } catch (e: Exception) { 0 }
             locationRepository.updateWifiJson(wifiJson)
+            
+            // fetch cell data
+            val cellJson = cellRepository.fetchCellData(wgsLat, wgsLng)
+            locationRepository.updateCellJson(cellJson)
+            
             _uiState.update { it.copy(wifiLoadStatus = WifiLoadStatus.DONE, wifiApCount = apCount) }
         }
     }
@@ -508,6 +633,14 @@ class MainViewModel(
             settingsRepository.setGlobalModeEnabled(enabled)
             SpooferProvider.isGlobalMode = enabled
             _uiState.update { it.copy(isGlobalModeEnabled = enabled) }
+        }
+    }
+
+    fun setFakeAirplaneMode(enabled: Boolean) {
+        viewModelScope.launch {
+            locationRepository.setFakeAirplaneMode(enabled)
+            settingsRepository.setFakeAirplaneModeEnabled(enabled)
+            _uiState.update { it.copy(isFakeAirplaneModeEnabled = enabled) }
         }
     }
 

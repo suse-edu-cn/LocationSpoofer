@@ -302,6 +302,11 @@ fun SpoofingScreen(
             GlobalModeCard(viewModel, uiState, isDark)
             Spacer(Modifier.height(16.dp))
 
+            SectionHeader(Icons.Rounded.AirplaneTicket, "飞行模式伪装", isDark)
+            Spacer(Modifier.height(8.dp))
+            FakeAirplaneModeCard(viewModel, uiState, isDark)
+            Spacer(Modifier.height(16.dp))
+
             // 已保存的位置列表（显示在操作按钮下方）
             if (uiState.savedLocations.isNotEmpty()) {
                 SectionHeader(Icons.Outlined.Bookmarks, "保存的位置", isDark)
@@ -841,6 +846,77 @@ fun SavedLocationsCard(
                 if (index < savedLocations.lastIndex) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), modifier = Modifier.padding(horizontal = 14.dp))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun FakeAirplaneModeCard(
+    viewModel: MainViewModel,
+    uiState: AppState,
+    isDark: Boolean
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
+                        .background(AccentOrange.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.AirplanemodeActive, null, tint = AccentOrange, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "飞行模式伪装",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (uiState.isFakeAirplaneModeEnabled) "开启后，开启飞行模式将不会断开移动网络和Wi-Fi"
+                        else "开启飞行模式会默认关闭所有无线连接",
+                        color = AppColors.textSecondary(isDark),
+                        fontSize = 12.sp
+                    )
+                }
+                Switch(
+                    checked = uiState.isFakeAirplaneModeEnabled,
+                    onCheckedChange = { viewModel.setFakeAirplaneMode(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = AccentOrange
+                    )
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AccentOrange.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    Icons.Outlined.Info, null,
+                    tint = AccentOrange,
+                    modifier = Modifier.size(14.dp).padding(top = 1.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "开启此项后，手动开启系统的飞行模式，系统将认为已断开基站连接，从而有效避免基站定位干扰，同时你的网络保持畅通。",
+                    color = AccentOrange,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
             }
         }
     }

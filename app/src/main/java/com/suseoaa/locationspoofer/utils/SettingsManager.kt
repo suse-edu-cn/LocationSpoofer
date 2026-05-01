@@ -19,6 +19,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("is_global_mode_enabled", false)
         set(value) = prefs.edit().putBoolean("is_global_mode_enabled", value).apply()
 
+    var isFakeAirplaneModeEnabled: Boolean
+        get() = prefs.getBoolean("is_fake_airplane_mode_enabled", false)
+        set(value) = prefs.edit().putBoolean("is_fake_airplane_mode_enabled", value).apply()
+
     fun getSavedLocations(): List<SavedLocation> {
         val jsonString = prefs.getString("saved_locations", "[]") ?: "[]"
         val list = mutableListOf<SavedLocation>()

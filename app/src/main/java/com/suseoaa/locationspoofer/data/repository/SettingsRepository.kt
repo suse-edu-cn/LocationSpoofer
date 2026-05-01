@@ -21,4 +21,8 @@ class SettingsRepository(private val settingsManager: SettingsManager) {
     fun isGlobalModeEnabled(): Boolean = settingsManager.isGlobalModeEnabled
 
     fun setGlobalModeEnabled(enabled: Boolean) { settingsManager.isGlobalModeEnabled = enabled }
+
+    fun isFakeAirplaneModeEnabled(): Boolean = settingsManager.isFakeAirplaneModeEnabled
+
+    fun setFakeAirplaneModeEnabled(enabled: Boolean) { settingsManager.isFakeAirplaneModeEnabled = enabled }
 }

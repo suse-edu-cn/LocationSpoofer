@@ -19,6 +19,7 @@ class SpooferProvider : ContentProvider() {
         @Volatile var latitude = 0.0
         @Volatile var longitude = 0.0
         @Volatile var wifiJson = "[]"
+        @Volatile var cellJson = "[]"
         @Volatile var simMode = "STILL"
         @Volatile var simBearing = 0f
         @Volatile var startTimestamp = 0L
@@ -75,6 +76,13 @@ class SpooferProvider : ContentProvider() {
                 is String -> wifiValue
                 else -> wifiJson
             }
+
+            val cellValue = json.opt("cell_json")
+            cellJson = when (cellValue) {
+                is JSONArray -> cellValue.toString()
+                is String -> cellValue
+                else -> cellJson
+            }
         } catch (e: Throwable) {
         }
     }
@@ -82,7 +90,7 @@ class SpooferProvider : ContentProvider() {
     private fun buildConfigCursor(): Cursor {
         val cursor = MatrixCursor(
             arrayOf(
-                "active", "lat", "lng", "wifi_json",
+                "active", "lat", "lng", "wifi_json", "cell_json",
                 "sim_mode", "sim_bearing", "start_timestamp",
                 "route_json", "is_route_mode"
             )
@@ -93,6 +101,7 @@ class SpooferProvider : ContentProvider() {
                 latitude,
                 longitude,
                 wifiJson,
+                cellJson,
                 simMode,
                 simBearing,
                 startTimestamp,

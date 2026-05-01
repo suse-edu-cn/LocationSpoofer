@@ -12,7 +12,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import org.json.JSONObject
 import java.io.File
 import java.lang.reflect.InvocationHandler
-import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.util.ArrayList
 
@@ -31,6 +30,17 @@ class LocationHooker : IXposedHookLoadPackage {
             "com.tencent.map",          // 腾讯地图
             "com.android.systemui",     // 系统UI（覆盖系统级定位弹窗）
             "com.google.android.gms",   // GooglePlay服务（覆盖Fused Location Provider）
+            "com.amap.android.location",// 高德网络定位服务(多厂商内置)
+            "com.amap.android.ams",
+            "com.baidu.map.location",   // 百度网络定位服务
+            "com.tencent.android.location",// 腾讯网络定位服务
+            "com.huawei.lbs",           // 华为LBS
+            "com.huawei.location",      // 华为定位服务
+            "com.xiaomi.metoknlp",      // 小米NLP
+            "com.coloros.pcmcs",        // OPPO NLP
+            "com.coloros.location",
+            "com.oplus.location",
+            "com.vivo.lbs"              // Vivo LBS
         )
 
         // 需要返回 GCJ-02 的应用包名（高德/腾讯等国内地图生态）
@@ -52,7 +62,7 @@ class LocationHooker : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
         val pkg = lpparam.packageName
 
-        // 宿主App自报平安
+        // 宿主App自报平安，并允许被Hook定位（解决软件内无法定位到当前位置的问题）
         if (pkg == "com.suseoaa.locationspoofer") {
             try {
                 XposedHelpers.findAndHookMethod(
@@ -68,7 +78,7 @@ class LocationHooker : IXposedHookLoadPackage {
             } catch (e: Throwable) {
                 XposedBridge.log(e)
             }
-            return // 宿主App不需要注入定位Hook
+            // 不再 return，让宿主App也能被Hook定位，从而在软件内地图正确显示模拟位置
         }
 
         // 在应用加载时读取活动与全局标志（一次性，快速 I/O）
@@ -77,16 +87,13 @@ class LocationHooker : IXposedHookLoadPackage {
         val configActive = flags.active
         val hookAllPackages = globalMode || configActive
 
-        // 系统进程：默认只Hook Location API，开启全局模式时追加网络/基站接管与底层上报阻断
+        // 系统进程：必须提前安装底层位置钩子，避免后续漏拦真实位置
+        // 注意：不要在系统进程挂钩网络和基站，否则会导致系统蜂窝网络和数据连接断开，进而引发鉴权失败等问题。
         if (SYSTEM_PACKAGES.contains(pkg)) {
             val useGcj = false
             hookLocationAPIs(lpparam.classLoader, useGcj)
             hookLocationManagerOverrides(lpparam.classLoader, useGcj)
             hookSystemLocationService(lpparam.classLoader, useGcj)
-            if (hookAllPackages) {
-                hookNetworkAndCellAPIs(lpparam.classLoader)
-                hookBluetoothLE(lpparam.classLoader)
-            }
             return
         }
 
@@ -207,47 +214,61 @@ class LocationHooker : IXposedHookLoadPackage {
         }
     }
 
+    private fun modifyLocationResult(
+        locationResult: Any,
+        config: JSONObject,
+        useGcj: Boolean
+    ) {
+        try {
+            @Suppress("UNCHECKED_CAST")
+            val locations = XposedHelpers.callMethod(locationResult, "getLocations") as? List<*>
+            locations?.forEach { loc ->
+                if (loc is Location) {
+                    modifyLocationObjectFields(loc, config, useGcj)
+                }
+            }
+        } catch (e: Throwable) {
+        }
+    }
+
     // ★ 路径三：系统级真实位置上报阻断
     private fun hookSystemLocationService(classLoader: ClassLoader, useGcj: Boolean) {
-        try {
-            // 拦截Android系统底层位置服务提供者的上报入口，从源头阻断硬件真实数据的传递
-            XposedHelpers.findAndHookMethod(
-                "com.android.server.location.provider.LocationProviderManager",
-                classLoader,
-                "onReportLocation",
-                "android.location.Location",
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val config = readConfig()
-                        if (config != null && config.optBoolean("active", false)) {
-                            val originalLocation = param.args[0] as? Location ?: return
-                            modifyLocationObjectFields(originalLocation, config, useGcj)
-                        }
+        val locationResultClass = findClassIfExists("android.location.LocationResult", classLoader)
+        val reportHook = object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val config = readConfig()
+                if (config == null || !config.optBoolean("active", false)) return
+
+                param.args?.forEach { arg ->
+                    when {
+                        arg is Location -> modifyLocationObjectFields(arg, config, useGcj)
+                        locationResultClass != null && arg != null && locationResultClass.isInstance(arg) ->
+                            modifyLocationResult(arg, config, useGcj)
                     }
                 }
+            }
+        }
+
+        try {
+            val providerManagerClass = findClassIfExists(
+                "com.android.server.location.provider.LocationProviderManager",
+                classLoader
             )
+            if (providerManagerClass != null) {
+                XposedBridge.hookAllMethods(providerManagerClass, "onReportLocation", reportHook)
+            }
         } catch (e: Throwable) {
             // Android版本差异可能导致类或方法不存在，静默处理
         }
 
         try {
-            // 兼容老版本Android底层的上报接口
-            XposedHelpers.findAndHookMethod(
+            val locationManagerServiceClass = findClassIfExists(
                 "com.android.server.location.LocationManagerService",
-                classLoader,
-                "reportLocation",
-                "android.location.Location",
-                Boolean::class.javaPrimitiveType,
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val config = readConfig()
-                        if (config != null && config.optBoolean("active", false)) {
-                            val originalLocation = param.args[0] as? Location ?: return
-                            modifyLocationObjectFields(originalLocation, config, useGcj)
-                        }
-                    }
-                }
+                classLoader
             )
+            if (locationManagerServiceClass != null) {
+                XposedBridge.hookAllMethods(locationManagerServiceClass, "reportLocation", reportHook)
+            }
         } catch (e: Throwable) {
         }
     }
@@ -938,6 +959,56 @@ class LocationHooker : IXposedHookLoadPackage {
     }
 
     private fun hookNetworkAndCellAPIs(classLoader: ClassLoader) {
+        // 0. 核心级伪装：选择性全局飞行模式欺骗
+        // 针对高德、系统定位服务和谷歌服务，强制返回 1（飞行模式开启）
+        // 对系统底层通讯(com.android.phone等)保持真实状态，保证不断网
+        try {
+            val hook = object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val config = readConfig()
+                    if (config != null && config.optBoolean("active", false)) {
+                        val key = param.args[1] as? String
+                        if (key == "airplane_mode_on") {
+                            val callerPkg = android.app.AndroidAppHelper.currentPackageName() ?: ""
+                            // 避开系统核心通讯以防止真实断网
+                            if (callerPkg != "com.android.phone" && callerPkg != "com.android.systemui" && callerPkg != "android") {
+                                param.result = 1
+                            }
+                        }
+                    }
+                }
+            }
+            XposedHelpers.findAndHookMethod(
+                "android.provider.Settings\$Global", classLoader, "getInt",
+                android.content.ContentResolver::class.java, String::class.java, Int::class.javaPrimitiveType, hook
+            )
+            XposedHelpers.findAndHookMethod(
+                "android.provider.Settings\$Global", classLoader, "getInt",
+                android.content.ContentResolver::class.java, String::class.java, hook
+            )
+            // 新增 getString Hook，部分应用/系统服务使用 getString("airplane_mode_on")
+            XposedHelpers.findAndHookMethod(
+                "android.provider.Settings\$Global", classLoader, "getString",
+                android.content.ContentResolver::class.java, String::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config != null && config.optBoolean("active", false)) {
+                            val key = param.args[1] as? String
+                            if (key == "airplane_mode_on") {
+                                val callerPkg = android.app.AndroidAppHelper.currentPackageName() ?: ""
+                                if (callerPkg != "com.android.phone" && callerPkg != "com.android.systemui" && callerPkg != "android") {
+                                    param.result = "1"
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        } catch (e: Throwable) {
+            XposedBridge.log(e)
+        }
+
         // 1. 伪造 WifiInfo Getter（getBSSID / getSSID / getMacAddress）
         val wifiInfoHook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -1135,11 +1206,112 @@ class LocationHooker : IXposedHookLoadPackage {
                         }
                     }
                 })
+
+            // 5. 拦截 Android 10+ registerScanResultsCallback (异步Wi-Fi扫描更新)
+            try {
+                val scanResultsCallbackClass = findClassIfExists("android.net.wifi.WifiManager\$ScanResultsCallback", classLoader)
+                if (scanResultsCallbackClass != null) {
+                    XposedHelpers.findAndHookMethod(
+                        "android.net.wifi.WifiManager",
+                        classLoader,
+                        "registerScanResultsCallback",
+                        java.util.concurrent.Executor::class.java,
+                        scanResultsCallbackClass,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val config = readConfig()
+                                if (config != null && config.optBoolean("active", false)) {
+                                    param.result = null // 阻断真实请求
+                                    
+                                    val executor = param.args[0] as? java.util.concurrent.Executor
+                                    val callback = param.args[1]
+                                    if (executor != null && callback != null) {
+                                        executor.execute {
+                                            try {
+                                                XposedHelpers.callMethod(callback, "onScanResultsAvailable")
+                                            } catch (e: Throwable) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            } catch (e: Throwable) {}
+
         } catch (e: Throwable) {
             XposedBridge.log(e)
         }
 
-        // 5. 基站信息伪造（CellLocation / AllCellInfo / NeighboringCellInfo）
+        // 6. 拦截 PhoneStateListener / TelephonyCallback 的回调
+        try {
+            val phoneStateListenerClass = findClassIfExists("android.telephony.PhoneStateListener", classLoader)
+            if (phoneStateListenerClass != null) {
+                XposedHelpers.findAndHookMethod(
+                    "android.telephony.TelephonyManager",
+                    classLoader,
+                    "listen",
+                    phoneStateListenerClass,
+                    Int::class.javaPrimitiveType,
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val config = readConfig()
+                            if (config != null && config.optBoolean("active", false)) {
+                                val listener = param.args[0] ?: return
+                                val events = param.args[1] as Int
+                                val snapshot = readTelephonySnapshot()
+                                val cellArray = config.optJSONArray("cell_json")
+                                
+                                val LISTEN_CELL_LOCATION = 0x00000010
+                                val LISTEN_CELL_INFO = 0x00000400
+                                val LISTEN_SERVICE_STATE = 0x00000001
+                                
+                                if ((events and LISTEN_CELL_LOCATION) != 0) {
+                                    try {
+                                        XposedHelpers.callMethod(listener, "onCellLocationChanged", null)
+                                    } catch (e: Throwable) {}
+                                }
+                                
+                                if ((events and LISTEN_CELL_INFO) != 0) {
+                                    try {
+                                        XposedHelpers.callMethod(listener, "onCellInfoChanged", java.util.ArrayList<Any>())
+                                    } catch (e: Throwable) {}
+                                }
+                                
+                                // Strip events to prevent system from updating them
+                                val newEvents = events and (LISTEN_CELL_LOCATION or LISTEN_CELL_INFO).inv()
+                                param.args[1] = newEvents
+                            }
+                        }
+                    }
+                )
+            }
+        } catch (e: Throwable) {}
+
+        // 7. 拦截 Android 12+ TelephonyCallback 注册
+        try {
+            val telephonyCallbackClass = findClassIfExists("android.telephony.TelephonyCallback", classLoader)
+            if (telephonyCallbackClass != null) {
+                XposedHelpers.findAndHookMethod(
+                    "android.telephony.TelephonyManager",
+                    classLoader,
+                    "registerTelephonyCallback",
+                    java.util.concurrent.Executor::class.java,
+                    telephonyCallbackClass,
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val config = readConfig()
+                            if (config != null && config.optBoolean("active", false)) {
+                                // Block the registration entirely to prevent background hardware updates.
+                                // The app will be forced to gracefully fall back to synchronous getAllCellInfo().
+                                param.result = null
+                            }
+                        }
+                    }
+                )
+            }
+        } catch (e: Throwable) {}
+
         val telephonyTypeHook = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val config = readConfig()
@@ -1202,21 +1374,60 @@ class LocationHooker : IXposedHookLoadPackage {
                 val lng = config.optDouble("lng", 0.0)
                 val ids = generateCellIds(lat, lng)
                 val snapshot = readTelephonySnapshot()
+                val cellArray = config.optJSONArray("cell_json")
+                val hasConfigCells = cellArray != null && cellArray.length() > 0
 
                 when (param.method.name) {
                     "getCellLocation" -> {
-                        param.result = buildFakeGsmCellLocation(classLoader, ids.lac, ids.cid)
+                        if (hasConfigCells) {
+                            val lac = cellArray!!.getJSONObject(0).optInt("lac", ids.lac)
+                            val cid = cellArray.getJSONObject(0).optInt("cid", ids.cid)
+                            param.result = buildFakeGsmCellLocation(classLoader, lac, cid)
+                        } else {
+                            param.result = buildFakeGsmCellLocation(classLoader, ids.lac, ids.cid)
+                        }
                     }
 
                     "getAllCellInfo" -> {
-                        param.result =
-                            buildFakeCellInfoList(
+                        if (hasConfigCells) {
+                            val list = java.util.ArrayList<Any>()
+                            for (i in 0 until cellArray!!.length()) {
+                                val c = cellArray.getJSONObject(i)
+                                val fakeIds = FakeCellIds(
+                                    c.optInt("lac", ids.lac),
+                                    c.optInt("cid", ids.cid),
+                                    ids.tac,
+                                    ids.pci,
+                                    ids.earfcn,
+                                    ids.nci
+                                )
+                                val info = if (isLteLike(snapshot.networkType)) {
+                                    buildCellInfoLte(
+                                        classLoader,
+                                        c.optInt("mcc", snapshot.mcc),
+                                        c.optInt("mnc", snapshot.mnc),
+                                        fakeIds
+                                    )
+                                } else {
+                                    buildCellInfoGsm(
+                                        classLoader,
+                                        c.optInt("mcc", snapshot.mcc),
+                                        c.optInt("mnc", snapshot.mnc),
+                                        fakeIds
+                                    )
+                                }
+                                if (info != null) list.add(info)
+                            }
+                            param.result = list
+                        } else {
+                            param.result = buildFakeCellInfoList(
                                 classLoader,
                                 snapshot.mcc,
                                 snapshot.mnc,
                                 ids,
                                 snapshot.networkType
                             )
+                        }
                     }
 
                     "getNeighboringCellInfo" -> param.result = ArrayList<Any>()
@@ -1243,6 +1454,79 @@ class LocationHooker : IXposedHookLoadPackage {
                 "getNeighboringCellInfo",
                 cellHook
             )
+            
+            try {
+                val executorClass = java.util.concurrent.Executor::class.java
+                val callbackClass = XposedHelpers.findClassIfExists("android.telephony.TelephonyManager\$CellInfoCallback", classLoader)
+                if (callbackClass != null) {
+                    XposedHelpers.findAndHookMethod(
+                        "android.telephony.TelephonyManager",
+                        classLoader,
+                        "requestCellInfoUpdate",
+                        executorClass,
+                        callbackClass,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val config = readConfig()
+                                if (config == null || !config.optBoolean("active", false)) return
+                                param.result = null // 拦截原方法
+                                val executor = param.args[0] as? java.util.concurrent.Executor
+                                val callback = param.args[1]
+                                if (executor != null && callback != null) {
+                                    val lat = config.optDouble("lat", 0.0)
+                                    val lng = config.optDouble("lng", 0.0)
+                                    val ids = generateCellIds(lat, lng)
+                                    val snapshot = readTelephonySnapshot()
+                                    val cellArray = config.optJSONArray("cell_json")
+                                    val hasConfigCells = cellArray != null && cellArray.length() > 0
+
+                                    val fakeList = if (hasConfigCells) {
+                                        val list = java.util.ArrayList<Any>()
+                                        for (i in 0 until cellArray!!.length()) {
+                                            val c = cellArray.getJSONObject(i)
+                                            val fakeIds = FakeCellIds(
+                                                c.optInt("lac", ids.lac),
+                                                c.optInt("cid", ids.cid),
+                                                ids.tac,
+                                                ids.pci,
+                                                ids.earfcn,
+                                                ids.nci
+                                            )
+                                            val info = if (isLteLike(snapshot.networkType)) {
+                                                buildCellInfoLte(
+                                                    classLoader,
+                                                    c.optInt("mcc", snapshot.mcc),
+                                                    c.optInt("mnc", snapshot.mnc),
+                                                    fakeIds
+                                                )
+                                            } else {
+                                                buildCellInfoGsm(
+                                                    classLoader,
+                                                    c.optInt("mcc", snapshot.mcc),
+                                                    c.optInt("mnc", snapshot.mnc),
+                                                    fakeIds
+                                                )
+                                            }
+                                            if (info != null) list.add(info)
+                                        }
+                                        list
+                                    } else {
+                                        buildFakeCellInfoList(classLoader, snapshot.mcc, snapshot.mnc, ids, snapshot.networkType)
+                                    }
+
+                                    executor.execute {
+                                        try {
+                                            XposedHelpers.callMethod(callback, "onCellInfo", fakeList)
+                                        } catch (e: Throwable) {}
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            } catch (e: Throwable) {
+                XposedBridge.log(e)
+            }
         } catch (e: Throwable) {
             XposedBridge.log(e)
         }
@@ -1443,6 +1727,98 @@ class LocationHooker : IXposedHookLoadPackage {
         }
     }
 
+    private fun buildCellInfoGsmDirect(
+        classLoader: ClassLoader,
+        mcc: Int,
+        mnc: Int,
+        lac: Int,
+        cid: Int,
+        signal: Int,
+        isRegistered: Boolean
+    ): Any? {
+        return try {
+            val cellInfoClass =
+                XposedHelpers.findClass("android.telephony.CellInfoGsm", classLoader)
+            val cellIdentityClass =
+                XposedHelpers.findClass("android.telephony.CellIdentityGsm", classLoader)
+            val cellSignalClass =
+                XposedHelpers.findClass("android.telephony.CellSignalStrengthGsm", classLoader)
+
+            val cellInfo = XposedHelpers.newInstance(cellInfoClass)
+            val cellIdentity = XposedHelpers.newInstance(cellIdentityClass)
+            val cellSignal = XposedHelpers.newInstance(cellSignalClass)
+
+            setIntFieldSafe(cellIdentity, "mLac", lac)
+            setIntFieldSafe(cellIdentity, "mCid", cid)
+            setIntFieldSafe(cellIdentity, "mMcc", mcc)
+            setIntFieldSafe(cellIdentity, "mMnc", mnc)
+            setStringFieldSafe(cellIdentity, "mMccStr", mcc.toString().padStart(3, '0'))
+            setStringFieldSafe(cellIdentity, "mMncStr", mnc.toString().padStart(2, '0'))
+
+            // Convert OpenCelliD signal (e.g. -85 dBm) to asu (0-31)
+            // asu = (signal + 113) / 2
+            val asu = ((signal + 113) / 2).coerceIn(0, 31)
+            setIntFieldSafe(cellSignal, "mSignalStrength", asu)
+            setIntFieldSafe(cellSignal, "mBitErrorRate", 0)
+
+            setObjectFieldSafe(cellInfo, "mCellIdentity", cellIdentity)
+            setObjectFieldSafe(cellInfo, "mCellSignalStrength", cellSignal)
+            setBooleanFieldSafe(cellInfo, "mRegistered", isRegistered)
+
+            cellInfo
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    private fun buildCellInfoLteDirect(
+        classLoader: ClassLoader,
+        mcc: Int,
+        mnc: Int,
+        cid: Int,
+        pci: Int,
+        tac: Int,
+        earfcn: Int,
+        signal: Int,
+        isRegistered: Boolean
+    ): Any? {
+        return try {
+            val cellInfoClass =
+                XposedHelpers.findClass("android.telephony.CellInfoLte", classLoader)
+            val cellIdentityClass =
+                XposedHelpers.findClass("android.telephony.CellIdentityLte", classLoader)
+            val cellSignalClass =
+                XposedHelpers.findClass("android.telephony.CellSignalStrengthLte", classLoader)
+
+            val cellInfo = XposedHelpers.newInstance(cellInfoClass)
+            val cellIdentity = XposedHelpers.newInstance(cellIdentityClass)
+            val cellSignal = XposedHelpers.newInstance(cellSignalClass)
+
+            setIntFieldSafe(cellIdentity, "mCi", cid)
+            setIntFieldSafe(cellIdentity, "mPci", pci)
+            setIntFieldSafe(cellIdentity, "mTac", tac)
+            setIntFieldSafe(cellIdentity, "mEarfcn", earfcn)
+            setIntFieldSafe(cellIdentity, "mMcc", mcc)
+            setIntFieldSafe(cellIdentity, "mMnc", mnc)
+            setStringFieldSafe(cellIdentity, "mMccStr", mcc.toString().padStart(3, '0'))
+            setStringFieldSafe(cellIdentity, "mMncStr", mnc.toString().padStart(2, '0'))
+
+            val asu = ((signal + 140)).coerceIn(0, 97)
+            setIntFieldSafe(cellSignal, "mSignalStrength", asu)
+            setIntFieldSafe(cellSignal, "mRsrp", signal)
+            setIntFieldSafe(cellSignal, "mRsrq", -10)
+            setIntFieldSafe(cellSignal, "mRssnr", 30)
+
+            setObjectFieldSafe(cellInfo, "mCellIdentity", cellIdentity)
+            setObjectFieldSafe(cellInfo, "mCellSignalStrength", cellSignal)
+            setBooleanFieldSafe(cellInfo, "mRegistered", isRegistered)
+
+            cellInfo
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     private fun setIntFieldSafe(target: Any, field: String, value: Int) {
         try {
             XposedHelpers.setIntField(target, field, value)
@@ -1583,6 +1959,7 @@ class LocationHooker : IXposedHookLoadPackage {
                 val content = file.readText()
                 val config = JSONObject(content)
                 if (!config.has("wifi_json")) config.put("wifi_json", org.json.JSONArray())
+                if (!config.has("cell_json")) config.put("cell_json", org.json.JSONArray())
                 lastConfig = config
                 lastReadTime = currentTime
                 config

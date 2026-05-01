@@ -41,7 +41,9 @@ class RootManager {
             "settings put global enable_gnss_raw_meas_full_tracking 0 2>/dev/null || true",
             "settings put secure enhanced_location_accuracy 0 2>/dev/null || true",
             "setprop debug.location.gnss.mock 1 2>/dev/null || true",
-            "setprop ro.com.google.locationfeatures 0 2>/dev/null || true"
+            "setprop ro.com.google.locationfeatures 0 2>/dev/null || true",
+            // ★ 新增强制拦截：关闭底层真实的 NLP 和 GNSS provider，仅保留 Mock
+            "settings put secure location_providers_allowed -gps,-network 2>/dev/null || true"
         ).exec().isSuccess
     }
 
@@ -50,7 +52,22 @@ class RootManager {
             "settings put secure location_mode 3",
             "settings put global assisted_gps_enabled 1",
             "settings put global location_accuracy_enabled 1 2>/dev/null || true",
-            "settings put secure enhanced_location_accuracy 1 2>/dev/null || true"
+            "settings put secure enhanced_location_accuracy 1 2>/dev/null || true",
+            "settings put secure location_providers_allowed +gps,+network 2>/dev/null || true"
+        ).exec().isSuccess
+    }
+
+    suspend fun enableFakeAirplaneMode(): Boolean = withContext(Dispatchers.IO) {
+        Shell.cmd(
+            "settings put global airplane_mode_radios \"bluetooth,nfc,wimax\"",
+            "settings put global airplane_mode_toggleable_radios \"bluetooth,wifi,nfc\""
+        ).exec().isSuccess
+    }
+
+    suspend fun disableFakeAirplaneMode(): Boolean = withContext(Dispatchers.IO) {
+        Shell.cmd(
+            "settings put global airplane_mode_radios \"cell,bluetooth,wifi,nfc,wimax\"",
+            "settings put global airplane_mode_toggleable_radios \"bluetooth,wifi,nfc\""
         ).exec().isSuccess
     }
 

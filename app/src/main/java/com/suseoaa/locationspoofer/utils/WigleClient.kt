@@ -5,9 +5,16 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 class WigleClient {
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .writeTimeout(2, TimeUnit.SECONDS)
+        .callTimeout(3, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
 
     /** 验证 token 是否有效（调用 /profile/user 接口） */
     suspend fun validateToken(token: String): Boolean = withContext(Dispatchers.IO) {
@@ -77,7 +84,6 @@ class WigleClient {
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
                 return@withContext generateFallbackWifi()
             }
         }

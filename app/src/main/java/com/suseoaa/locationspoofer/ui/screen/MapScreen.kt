@@ -39,8 +39,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.amap.api.location.AMapLocationClient
-import com.amap.api.location.AMapLocationClientOption
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.BitmapDescriptorFactory
@@ -281,24 +279,17 @@ fun FullScreenMapPage(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = AccentBlue
             ) {
-                val client = AMapLocationClient(context.applicationContext)
-                client.setLocationOption(AMapLocationClientOption().apply {
-                    locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                    isOnceLocation = true
-                })
-                client.setLocationListener { loc ->
-                    if (loc != null && loc.errorCode == 0) {
-                        viewModel.updateLatitude(String.format("%.6f", loc.latitude))
-                        viewModel.updateLongitude(String.format("%.6f", loc.longitude))
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            mapRef?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f))
-                        }
-                    } else {
-                        Toast.makeText(context, "定位失败: ${loc?.errorInfo ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                viewModel.requestCurrentLocation(
+                    context,
+                    onLocated = { lat, lng ->
+                        mapRef?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), 16f)
+                        )
+                    },
+                    onError = { msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
-                    client.stopLocation(); client.onDestroy()
-                }
-                client.startLocation()
+                )
             }
         }
 

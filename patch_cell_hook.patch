@@ -1,0 +1,57 @@
+--- app/src/main/java/com/suseoaa/locationspoofer/xposed/LocationHooker.kt
++++ app/src/main/java/com/suseoaa/locationspoofer/xposed/LocationHooker.kt
+@@ -1316,21 +1316,40 @@
+         val cellHook = object : XC_MethodHook() {
+             override fun beforeHookedMethod(param: MethodHookParam) {
+                 val config = readConfig()
+                 if (config == null || !config.optBoolean("active", false)) return
+ 
+                 val lat = config.optDouble("lat", 0.0)
+                 val lng = config.optDouble("lng", 0.0)
+                 val ids = generateCellIds(lat, lng)
+                 val snapshot = readTelephonySnapshot()
++                
++                val cellArray = config.optJSONArray("cell_json")
++                val hasConfigCells = cellArray != null && cellArray.length() > 0
+ 
+                 when (param.method.name) {
+                     "getCellLocation" -> {
+-                        param.result = buildFakeGsmCellLocation(classLoader, ids.lac, ids.cid)
++                        if (hasConfigCells) {
++                            val firstCell = cellArray!!.getJSONObject(0)
++                            val lac = firstCell.optInt("lac", ids.lac)
++                            val cid = firstCell.optInt("cid", ids.cid)
++                            param.result = buildFakeGsmCellLocation(classLoader, lac, cid)
++                        } else {
++                            param.result = buildFakeGsmCellLocation(classLoader, ids.lac, ids.cid)
++                        }
+                     }
+ 
+                     "getAllCellInfo" -> {
+-                        param.result =
+-                            buildFakeCellInfoList(
+-                                classLoader,
+-                                snapshot.mcc,
+-                                snapshot.mnc,
+-                                ids,
+-                                snapshot.networkType
+-                            )
++                        if (hasConfigCells) {
++                            val list = java.util.ArrayList<Any>()
++                            for (i in 0 until cellArray!!.length()) {
++                                val c = cellArray.getJSONObject(i)
++                                val fakeIds = FakeCellIds(c.optInt("lac", ids.lac), c.optInt("cid", ids.cid), ids.tac, ids.pci, ids.earfcn, ids.nci)
++                                val info = if (isLteLike(snapshot.networkType)) {
++                                    buildCellInfoLte(classLoader, c.optInt("mcc", 460), c.optInt("mnc", 0), fakeIds)
++                                } else {
++                                    buildCellInfoGsm(classLoader, c.optInt("mcc", 460), c.optInt("mnc", 0), fakeIds)
++                                }
++                                if (info != null) list.add(info)
++                            }
++                            param.result = list
++                        } else {
++                            param.result = buildFakeCellInfoList(classLoader, snapshot.mcc, snapshot.mnc, ids, snapshot.networkType)
++                        }
+                     }
+ 
+                     "getNeighboringCellInfo" -> param.result = ArrayList<Any>()
