@@ -152,7 +152,9 @@ fun MainScreen(
                     icon = Icons.Rounded.Lock,
                     title = "需要 Root 权限",
                     message = "本应用需要 Root 权限才能运行。\n请在 KernelSU 或 Magisk 中授权后重启应用。",
-                    isDark = isDark
+                    isDark = isDark,
+                    onAction = { viewModel.refreshRootAccess() },
+                    actionLabel = "重新检测 Root"
                 )
                 !uiState.isLSPosedActive -> BlockingScreen(
                     icon = Icons.Rounded.Extension,

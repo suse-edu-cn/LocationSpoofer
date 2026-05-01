@@ -80,6 +80,21 @@ class MainViewModel(
         }
     }
 
+    fun refreshRootAccess() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isInitializing = true) }
+            val root = locationRepository.checkRootAccess()
+            val lsposed = locationRepository.isModuleActive()
+            _uiState.update {
+                it.copy(
+                    isInitializing = false,
+                    hasRootAccess = root,
+                    isLSPosedActive = lsposed
+                )
+            }
+        }
+    }
+
     // 当前位置获取
 
     fun fetchCurrentLocation(ctx: Context) {

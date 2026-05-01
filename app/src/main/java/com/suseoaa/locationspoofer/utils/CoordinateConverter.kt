@@ -21,6 +21,20 @@ object CoordinateConverter {
         return Pair(gcjLat - dLat, gcjLng - dLng)
     }
 
+    /** WGS-84（GPS标准）→ GCJ-02（高德/腾讯）。中国境外坐标原样返回。 */
+    fun wgs84ToGcj02(wgsLat: Double, wgsLng: Double): Pair<Double, Double> {
+        if (isOutOfChina(wgsLat, wgsLng)) return Pair(wgsLat, wgsLng)
+        var dLat = transformLat(wgsLng - 105.0, wgsLat - 35.0)
+        var dLng = transformLng(wgsLng - 105.0, wgsLat - 35.0)
+        val radLat = wgsLat / 180.0 * PI
+        var magic = sin(radLat)
+        magic = 1 - EE * magic * magic
+        val sqrtMagic = sqrt(magic)
+        dLat = dLat * 180.0 / ((A * (1 - EE)) / (magic * sqrtMagic) * PI)
+        dLng = dLng * 180.0 / (A / sqrtMagic * cos(radLat) * PI)
+        return Pair(wgsLat + dLat, wgsLng + dLng)
+    }
+
     private fun isOutOfChina(lat: Double, lng: Double): Boolean {
         return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271
     }
