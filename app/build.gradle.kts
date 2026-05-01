@@ -1,7 +1,25 @@
+import java.io.FileInputStream
+import org.yaml.snakeyaml.Yaml
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
 }
+
+// 读取 local.yml 配置（本地开发），CI 从环境变量读取
+fun loadLocalYml(): Map<String, String> {
+    val ymlFile = rootProject.file("local.yml")
+    return if (ymlFile.exists()) {
+        val yaml = Yaml()
+        @Suppress("UNCHECKED_CAST")
+        yaml.load(FileInputStream(ymlFile)) as Map<String, String>
+    } else {
+        emptyMap()
+    }
+}
+
+val localYml = loadLocalYml()
+fun secret(key: String): String = System.getenv(key) ?: localYml[key] ?: ""
 
 android {
     namespace = "com.suseoaa.locationspoofer"
@@ -11,12 +29,16 @@ android {
         applicationId = "com.suseoaa.locationspoofer"
         minSdk = 26
         targetSdk = 34
-        versionCode = 147
-        versionName = "1.4.7"
+        versionCode = 148
+        versionName = "1.4.8"
 
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "WIGLE_TOKEN", "\"${secret("WIGLE_TOKEN")}\"")
+        buildConfigField("String", "AMAP_API_KEY", "\"${secret("AMAP_API_KEY")}\"")
+        manifestPlaceholders["AMAP_API_KEY"] = secret("AMAP_API_KEY")
     }
     signingConfigs {
         create("release") {
@@ -24,9 +46,9 @@ android {
                 ?: "/Users/vincent/Desktop/SUSE-APP-Key/APP-Key.jks"
             if (file(keystorePath).exists()) {
                 storeFile = file(keystorePath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "LinuxisUbuntu18"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "suse-app-key"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "LinuxisUbuntu18"
+                storePassword = secret("KEYSTORE_PASSWORD")
+                keyAlias = secret("KEY_ALIAS")
+                keyPassword = secret("KEY_PASSWORD")
             }
         }
     }
@@ -53,6 +75,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"

@@ -24,6 +24,7 @@ import com.suseoaa.locationspoofer.data.repository.CellRepository
 import com.suseoaa.locationspoofer.data.repository.LocationRepository
 import com.suseoaa.locationspoofer.data.repository.SettingsRepository
 import com.suseoaa.locationspoofer.data.repository.WifiRepository
+import com.suseoaa.locationspoofer.BuildConfig
 import com.suseoaa.locationspoofer.provider.SpooferProvider
 import com.suseoaa.locationspoofer.service.SpoofingService
 import com.suseoaa.locationspoofer.utils.CoordinateConverter
@@ -45,8 +46,7 @@ class MainViewModel(
     private val context: Context
 ) : ViewModel() {
 
-    private val wigleToken =
-        "QUlEODRhYjYwNzVjYjI4MTY5ZDU4Yjk2NzQxM2ZiYTFiMDA6YmY2NWE5M2RiYWQ1YzYwNmYwNzdkOTQ2NjE2NmI4MzM="
+    private val wigleToken = BuildConfig.WIGLE_TOKEN
 
     private val _uiState = MutableStateFlow(
         AppState(savedLocations = settingsRepository.getSavedLocations())

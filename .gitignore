@@ -3,6 +3,7 @@
 .idea/
 *.iml
 local.properties
+local.yml
 
 # ─── Gradle ──────────────────────────────────────────────
 .gradle/
