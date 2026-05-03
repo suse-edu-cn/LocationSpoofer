@@ -1,0 +1,3 @@
+/Users/vincent/Desktop/FuckLocationOfSUSE/app/.cxx/Debug/6p4n5m6h/armeabi-v7a/CMakeFiles/gnss_spoof_daemon.dir
+/Users/vincent/Desktop/FuckLocationOfSUSE/app/.cxx/Debug/6p4n5m6h/armeabi-v7a/CMakeFiles/edit_cache.dir
+/Users/vincent/Desktop/FuckLocationOfSUSE/app/.cxx/Debug/6p4n5m6h/armeabi-v7a/CMakeFiles/rebuild_cache.dir

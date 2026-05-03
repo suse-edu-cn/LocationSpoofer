@@ -1,0 +1,7 @@
+# ninja log v5
+1113	1180	1777800719798929832	/Users/vincent/Desktop/FuckLocationOfSUSE/app/build/intermediates/cxx/Debug/6p4n5m6h/obj/armeabi-v7a/gnss_spoof_daemon	4caecbf6eaecf23e
+0	1113	1777800719725962104	CMakeFiles/gnss_spoof_daemon.dir/daemon/config_watcher.cpp.o	180e5160e4c9491b
+0	951	1777800719566143955	CMakeFiles/gnss_spoof_daemon.dir/daemon/main.cpp.o	10e35fe80e22e79e
+1	453	1777800719070894827	CMakeFiles/gnss_spoof_daemon.dir/daemon/nmea_generator.cpp.o	78f7bf3f2755c210
+1	283	1777800718900724754	CMakeFiles/gnss_spoof_daemon.dir/daemon/sat_simulator.cpp.o	e341d0db605909f7
+2	72	1777800854526366305	/Users/vincent/Desktop/FuckLocationOfSUSE/app/build/intermediates/cxx/Debug/6p4n5m6h/obj/armeabi-v7a/libgnss_spoof_daemon.so	24bf0d3985328e89

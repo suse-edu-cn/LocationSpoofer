@@ -1,0 +1,14 @@
+# Allow gnss_spoof_daemon to run as root and create the character device / FIFO
+allow su device:chr_file { read write open ioctl };
+allow su device:fifo_file { read write open create };
+
+# Allow the HAL process to read the virtual character device / FIFO
+allow hal_gnss_default device:chr_file { read write open ioctl };
+allow hal_gnss_default device:fifo_file { read write open ioctl getattr };
+
+# Allow daemon to read/write /data/local/tmp/ configurations and state
+allow untrusted_data_file system_data_file:file { read write open create };
+allow hal_gnss_default system_data_file:file { read open getattr };
+
+# Allow service.sh to execute settings and iptables
+allow shell system_data_file:file { read write open };

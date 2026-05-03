@@ -35,6 +35,8 @@ data class AppState(
     val isInitializing: Boolean = true,
     val hasRootAccess: Boolean = false,
     val isLSPosedActive: Boolean = false,
+    val initStatus: String = "",
+    val needReboot: Boolean = false,
     val longitudeInput: String = "",
     val latitudeInput: String = "",
     val showCoordinateError: Boolean = false,

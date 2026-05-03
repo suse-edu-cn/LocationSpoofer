@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="xposed_scope">
-        <item>com.tencent.mm</item>
-        <item>com.chaoxing.mobile</item>
-        <item>cn.chaoxing.lemon</item>
-        <item>com.alibaba.android.rimet</item>
-        <item>com.sankuai.meituan</item>
-        <item>com.baidu.BaiduMap</item>
-        <item>com.autonavi.minimap</item>
-        <item>com.tencent.map</item>
-        <item>com.android.systemui</item>
+        <!-- 核心：GMS 融合定位进程（FusedLocationProvider 运行于此） -->
         <item>com.google.android.gms</item>
+        <item>com.google.android.gms.persistent</item>
+        <item>com.google.android.gms.unstable</item>
+        <!-- 系统框架层 -->
         <item>android</item>
         <item>system</item>
         <item>com.android.phone</item>
+        <item>com.android.systemui</item>
         <item>com.android.providers.settings</item>
+        <!-- 地图应用 -->
+        <item>com.autonavi.minimap</item>
+        <item>com.baidu.BaiduMap</item>
+        <item>com.tencent.map</item>
+        <!-- 社交/办公应用 -->
+        <item>com.tencent.mm</item>
+        <item>com.alibaba.android.rimet</item>
+        <item>com.sankuai.meituan</item>
+        <item>com.chaoxing.mobile</item>
+        <item>cn.chaoxing.lemon</item>
     </string-array>
 </resources>

@@ -135,14 +135,18 @@ fun MainScreen(
                 !uiState.hasRootAccess -> BlockingScreen(
                     icon = Icons.Rounded.Lock,
                     title = "需要 Root 权限",
-                    message = "本应用需要 KernelSU Root 权限才能运行。\n请在 KernelSU 中授权后重启应用。",
-                    isDark = isDark
+                    message = "本应用需要 KernelSU Root 权限才能运行。\n请在 KernelSU 中授权后重启应用。\n\n${uiState.initStatus}",
+                    isDark = isDark,
+                    needReboot = uiState.needReboot,
+                    onReboot = { viewModel.rebootSystem() }
                 )
                 !uiState.isLSPosedActive -> BlockingScreen(
                     icon = Icons.Rounded.Extension,
                     title = "LSPosed 模块未激活",
-                    message = "请在 LSPosed 管理器中启用本模块，\n勾选需要欺骗的应用后重启目标应用。",
-                    isDark = isDark
+                    message = "请在 LSPosed 管理器中启用本模块，\n勾选需要欺骗的应用后重启目标应用。\n\n${uiState.initStatus}",
+                    isDark = isDark,
+                    needReboot = uiState.needReboot,
+                    onReboot = { viewModel.rebootSystem() }
                 )
                 else -> SpoofingScreen(
                     viewModel = viewModel,

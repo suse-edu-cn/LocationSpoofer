@@ -41,11 +41,6 @@
         </activity>
         <service android:name="com.amap.api.location.APSService" />
         <service
-            android:name=".service.SpoofingService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="location" />
-        <service
             android:name=".service.FloatingJoystickService"
             android:enabled="true"
             android:exported="false" />

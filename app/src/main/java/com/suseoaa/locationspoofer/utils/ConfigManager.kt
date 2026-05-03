@@ -8,7 +8,13 @@ import org.json.JSONObject
 
 class ConfigManager(private val rootManager: RootManager) {
 
+    companion object {
+        private const val CONFIG_FILE_NAME = "locationspoofer_config.json"
+        private const val CONFIG_FILE_PATH = "/data/local/tmp/$CONFIG_FILE_NAME"
+    }
+
     suspend fun saveConfig(
+        context: android.content.Context,
         lat: Double,
         lng: Double,
         active: Boolean,
@@ -16,7 +22,9 @@ class ConfigManager(private val rootManager: RootManager) {
         simBearing: Float = 0f,
         startTimestamp: Long = System.currentTimeMillis(),
         routePoints: List<RoutePoint> = emptyList(),
-        isRouteMode: Boolean = false
+        isRouteMode: Boolean = false,
+        wifiJson: String = "[]",
+        cellJson: String = "[]"
     ) = withContext(Dispatchers.IO) {
         val routeArray = JSONArray()
         routePoints.forEach { p ->
@@ -35,14 +43,21 @@ class ConfigManager(private val rootManager: RootManager) {
             put("start_timestamp", startTimestamp)
             put("route_points", routeArray)
             put("is_route_mode", isRouteMode)
+            put("wifi_json", wifiJson)
+            put("cell_json", cellJson)
         }
 
-        val command = """
-            echo '${json.toString()}' > /data/local/tmp/locationspoofer_config.json
-            chmod 777 /data/local/tmp/locationspoofer_config.json
-            chcon u:object_r:shell_data_file:s0 /data/local/tmp/locationspoofer_config.json
-        """.trimIndent()
+        val jsonStr = json.toString()
 
-        rootManager.executeCommand(command)
+        // 1. 写入 app 内部存储（Xposed 模块可通过 ContentProvider 读取）
+        try {
+            context.openFileOutput(CONFIG_FILE_NAME, android.content.Context.MODE_PRIVATE).use {
+                it.write(jsonStr.toByteArray(Charsets.UTF_8))
+            }
+        } catch (_: Exception) {}
+
+        // 2. 通过 root 写入 /data/local/tmp/（system_server 和其他进程的回退路径）
+        val base64 = android.util.Base64.encodeToString(jsonStr.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        rootManager.executeCommand("echo '$base64' | base64 -d > $CONFIG_FILE_PATH && chmod 644 $CONFIG_FILE_PATH")
     }
 }

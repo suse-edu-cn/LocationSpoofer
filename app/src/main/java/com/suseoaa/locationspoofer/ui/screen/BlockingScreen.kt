@@ -60,7 +60,14 @@ fun InitializingScreen(isDark: Boolean) {
 }
 
 @Composable
-fun BlockingScreen(icon: ImageVector, title: String, message: String, isDark: Boolean) {
+fun BlockingScreen(
+    icon: ImageVector,
+    title: String,
+    message: String,
+    isDark: Boolean,
+    needReboot: Boolean = false,
+    onReboot: (() -> Unit)? = null
+) {
     val textSecondary = AppColors.textSecondary(isDark)
 
     Box(
@@ -99,6 +106,22 @@ fun BlockingScreen(icon: ImageVector, title: String, message: String, isDark: Bo
                 lineHeight = 20.sp,
                 textAlign = TextAlign.Center
             )
+            if (needReboot && onReboot != null) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onReboot,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("重启系统")
+                }
+                Text(
+                    "修改可能需要重启后生效",
+                    color = textSecondary,
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 }

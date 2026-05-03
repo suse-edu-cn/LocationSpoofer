@@ -1,0 +1,6 @@
+id=location_spoofer_defense
+name=Location Spoofer Defense
+version=1.0
+versionCode=1
+author=SuseoAA
+description=Block SUPL/GNSS network assistance and override GPS config to prevent location rubber-banding
