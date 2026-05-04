@@ -281,6 +281,9 @@ fun FullScreenMapPage(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = AccentBlue
             ) {
+                AMapLocationClient.updatePrivacyShow(context.applicationContext, true, true)
+                AMapLocationClient.updatePrivacyAgree(context.applicationContext, true)
+                AMapLocationClientOption.setLocationProtocol(AMapLocationClientOption.AMapLocationProtocol.HTTPS)
                 val client = AMapLocationClient(context.applicationContext)
                 client.setLocationOption(AMapLocationClientOption().apply {
                     locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy

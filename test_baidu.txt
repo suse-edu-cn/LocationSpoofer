@@ -1,0 +1,28 @@
+    private fun hookBaiduAndTencentSDKs(classLoader: ClassLoader) {
+        // Baidu Hook
+        val bdLocationClass = XposedHelpers.findClassIfExists("com.baidu.location.BDLocation", classLoader)
+        if (bdLocationClass != null) {
+            try {
+                val getLatHook = object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val config = readConfig()
+                        if (config != null && config.optBoolean("active", false)) {
+                            val baseLat = config.optDouble("lat", 0.0)
+                            val baseLng = config.optDouble("lng", 0.0)
+                            // Note: BDLocation might use bd09ll or gcj02.
+                            // If it's gcj02, we just return the gcj02 base.
+                            // To be safe, just return the gcj02 coordinate as it's common.
+                            val coordType = XposedHelpers.callMethod(param.thisObject, "getCoorType") as? String
+                            if (coordType == "bd09ll") {
+                                // For simplicity, convert gcj02 to bd09ll
+                                val bd09 = gcj02ToBd09(baseLat, baseLng)
+                                param.result = getJitteredLocation(bd09.first, bd09.second).first
+                            } else {
+                                param.result = getJitteredLocation(baseLat, baseLng).first
+                            }
+                        }
+                    }
+                }
+            } catch (e: Throwable) {}
+        }
+    }

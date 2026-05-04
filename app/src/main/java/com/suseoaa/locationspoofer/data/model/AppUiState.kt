@@ -1,7 +1,5 @@
 package com.suseoaa.locationspoofer.data.model
 
-enum class WifiLoadStatus { IDLE, LOADING, DONE }
-
 enum class SimMode(val label: String, val speedMs: Double) {
     STILL("静止", 0.0),
     WALKING("步行", 1.4),
@@ -39,8 +37,6 @@ data class AppState(
     val latitudeInput: String = "",
     val showCoordinateError: Boolean = false,
     val isSpoofingActive: Boolean = false,
-    val wifiLoadStatus: WifiLoadStatus = WifiLoadStatus.IDLE,
-    val wifiApCount: Int = 0,
     val savedLocations: List<SavedLocation> = emptyList(),
     val searchKeyword: String = "",
     val searchResults: List<SavedLocation> = emptyList(),

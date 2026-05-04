@@ -49,7 +49,6 @@ import com.amap.api.services.core.PoiItem
 import com.amap.api.services.poisearch.PoiSearch
 import com.suseoaa.locationspoofer.data.model.AppState
 import com.suseoaa.locationspoofer.data.model.SavedLocation
-import com.suseoaa.locationspoofer.data.model.WifiLoadStatus
 import com.suseoaa.locationspoofer.ui.components.AMapView
 import com.suseoaa.locationspoofer.ui.theme.AccentBlue
 import com.suseoaa.locationspoofer.ui.theme.AccentGreen
@@ -289,11 +288,6 @@ fun SpoofingScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            if (uiState.isSpoofingActive) {
-                WifiStatusCard(uiState)
-                Spacer(Modifier.height(12.dp))
-            }
-
             CoordinateInputCard(viewModel, uiState, isDark) { showSaveDialog = true }
             Spacer(Modifier.height(12.dp))
 
@@ -347,47 +341,6 @@ fun SpoofingScreen(
     }
 }
 
-
-// Wi-Fi 状态卡片
-
-private data class StatusStyle(
-    val bgColor: Color, val tint: Color, val text: String, val icon: ImageVector
-)
-
-@Composable
-fun WifiStatusCard(uiState: AppState) {
-    val style = when (uiState.wifiLoadStatus) {
-        WifiLoadStatus.LOADING -> StatusStyle(
-            AccentOrange.copy(alpha = 0.12f), AccentOrange,
-            "正在拉取当地 Wi-Fi 指纹数据...", Icons.Outlined.CloudDownload
-        )
-        WifiLoadStatus.DONE -> StatusStyle(
-            AccentGreen.copy(alpha = 0.12f), AccentGreen,
-            "Wi-Fi 指纹已就绪（${uiState.wifiApCount} 个热点）", Icons.Outlined.Wifi
-        )
-        else -> StatusStyle(
-            AccentBlue.copy(alpha = 0.12f), AccentBlue,
-            "GPS 定位已接管", Icons.Outlined.GpsFixed
-        )
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(style.bgColor)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (uiState.wifiLoadStatus == WifiLoadStatus.LOADING) {
-            CircularProgressIndicator(color = style.tint, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-        } else {
-            Icon(style.icon, null, tint = style.tint, modifier = Modifier.size(18.dp))
-        }
-        Spacer(Modifier.width(10.dp))
-        Text(style.text, color = style.tint, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
 
 // 坐标输入卡片
 

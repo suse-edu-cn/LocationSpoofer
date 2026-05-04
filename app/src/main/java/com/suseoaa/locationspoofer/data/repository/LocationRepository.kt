@@ -37,6 +37,7 @@ class LocationRepository(
         SpooferProvider.simMode = simMode
         SpooferProvider.simBearing = simBearing
         SpooferProvider.wifiJson = "[]"
+        SpooferProvider.cellJson = "[]"
         SpooferProvider.routeJson = routePointsToJson(routePoints)
         SpooferProvider.isRouteMode = isRouteMode
 
@@ -55,6 +56,7 @@ class LocationRepository(
     suspend fun stopSpoofing(context: Context) {
         SpooferProvider.isActive = false
         SpooferProvider.wifiJson = "[]"
+        SpooferProvider.cellJson = "[]"
         SpooferProvider.routeJson = "[]"
         SpooferProvider.isRouteMode = false
         configManager.saveConfig(0.0, 0.0, false)
@@ -83,8 +85,38 @@ class LocationRepository(
         configManager.saveConfig(lat, lng, true, simMode, simBearing, startTime, routePoints, isRouteMode)
     }
 
-    fun updateWifiJson(wifiJson: String) {
+    suspend fun updateWifiJson(wifiJson: String) {
         SpooferProvider.wifiJson = wifiJson
+        syncConfig()
+    }
+
+    suspend fun updateCellJson(cellJson: String) {
+        SpooferProvider.cellJson = cellJson
+        syncConfig()
+    }
+
+    private suspend fun syncConfig() {
+        if (SpooferProvider.isActive) {
+            val routePoints = try {
+                val arr = JSONArray(SpooferProvider.routeJson)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    RoutePoint(obj.getDouble("lat"), obj.getDouble("lng"))
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            configManager.saveConfig(
+                SpooferProvider.latitude,
+                SpooferProvider.longitude,
+                true,
+                SpooferProvider.simMode,
+                SpooferProvider.simBearing,
+                SpooferProvider.startTimestamp,
+                routePoints,
+                SpooferProvider.isRouteMode
+            )
+        }
     }
 
     private fun routePointsToJson(points: List<RoutePoint>): String {

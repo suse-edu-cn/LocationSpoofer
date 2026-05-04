@@ -1,6 +1,7 @@
 package com.suseoaa.locationspoofer.viewmodel
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.amap.api.location.AMapLocationClient
@@ -11,10 +12,9 @@ import com.suseoaa.locationspoofer.data.model.RoutePlanStage
 import com.suseoaa.locationspoofer.data.model.RouteRunMode
 import com.suseoaa.locationspoofer.data.model.SavedLocation
 import com.suseoaa.locationspoofer.data.model.SimMode
-import com.suseoaa.locationspoofer.data.model.WifiLoadStatus
 import com.suseoaa.locationspoofer.data.repository.LocationRepository
 import com.suseoaa.locationspoofer.data.repository.SettingsRepository
-import com.suseoaa.locationspoofer.data.repository.WifiRepository
+import com.suseoaa.locationspoofer.data.repository.CellRepository
 import com.suseoaa.locationspoofer.provider.SpooferProvider
 import com.suseoaa.locationspoofer.service.SpoofingService
 import kotlinx.coroutines.Dispatchers
@@ -30,12 +30,11 @@ import kotlinx.coroutines.launch
 class MainViewModel(
     private val locationRepository: LocationRepository,
     private val settingsRepository: SettingsRepository,
-    private val wifiRepository: WifiRepository,
+    private val cellRepository: CellRepository,
     private val context: Context
 ) : ViewModel() {
 
-    private val wigleToken =
-        "QUlEODRhYjYwNzVjYjI4MTY5ZDU4Yjk2NzQxM2ZiYTFiMDA6YmY2NWE5M2RiYWQ1YzYwNmYwNzdkOTQ2NjE2NmI4MzM="
+    private val openCellIdToken = "pk.84cd3deda809a3898ea6a7eb7920b5ab"
 
     private val _uiState = MutableStateFlow(
         AppState(savedLocations = settingsRepository.getSavedLocations())
@@ -49,13 +48,10 @@ class MainViewModel(
         initialize()
     }
 
-    // 初始化
-
     private fun initialize() {
         viewModelScope.launch(Dispatchers.IO) {
             val root = locationRepository.checkRootAccess()
             val lsposed = locationRepository.isModuleActive()
-            wifiRepository.validateToken(wigleToken)
 
             if (SpoofingService.isRunning) {
                 locationRepository.stopSpoofing(context)
@@ -74,14 +70,15 @@ class MainViewModel(
         }
     }
 
-    // 当前位置获取
-
     fun fetchCurrentLocation(ctx: Context) {
         val client = try {
+            AMapLocationClient.updatePrivacyShow(ctx.applicationContext, true, true)
+            AMapLocationClient.updatePrivacyAgree(ctx.applicationContext, true)
             AMapLocationClient(ctx.applicationContext)
         } catch (e: Exception) {
             return
         }
+        AMapLocationClientOption.setLocationProtocol(AMapLocationClientOption.AMapLocationProtocol.HTTPS)
         client.setLocationOption(AMapLocationClientOption().apply {
             locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
             isOnceLocation = true
@@ -104,8 +101,6 @@ class MainViewModel(
         client.startLocation()
     }
 
-    // 坐标输入
-
     fun updateLongitude(value: String) {
         if (isValidCoord(value)) _uiState.update { it.copy(longitudeInput = value, showCoordinateError = false) }
     }
@@ -119,8 +114,6 @@ class MainViewModel(
         return value.toDoubleOrNull() != null
     }
 
-    // 定点模拟
-
     fun startSpoofing() {
         val state = _uiState.value
         val lng = state.longitudeInput.toDoubleOrNull()
@@ -130,23 +123,33 @@ class MainViewModel(
             return
         }
         viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isSpoofingActive = true
+                )
+            }
+
             val now = System.currentTimeMillis()
+            // 立即开启模拟，消除等待网络请求的延迟
             locationRepository.startSpoofing(
                 context, lat, lng,
                 "STILL", 0f, now,
                 emptyList(), false
             )
-            _uiState.update {
-                it.copy(
-                    isSpoofingActive = true,
-                    wifiLoadStatus = WifiLoadStatus.LOADING,
-                    wifiApCount = 0
-                )
+            Log.i("MainViewModel", ">>> POINT SPOOFING STARTED IMMEDIATELY.")
+
+            // 后台异步获取基站数据并更新
+            launch(Dispatchers.IO) {
+                try {
+                    Log.i("MainViewModel", ">>> Fetching Cell Data for Point Spoofing...")
+                    val cellJson = cellRepository.fetchCellData(lat, lng, openCellIdToken)
+                    Log.i("MainViewModel", ">>> Cell data complete. Result: $cellJson")
+                    locationRepository.updateWifiJson("[]")
+                    locationRepository.updateCellJson(cellJson)
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Fetch Cell Data failed", e)
+                }
             }
-            val wifiJson = wifiRepository.fetchWifiData(lat, lng, wigleToken)
-            val apCount = try { org.json.JSONArray(wifiJson).length() } catch (e: Exception) { 0 }
-            locationRepository.updateWifiJson(wifiJson)
-            _uiState.update { it.copy(wifiLoadStatus = WifiLoadStatus.DONE, wifiApCount = apCount) }
         }
     }
 
@@ -159,15 +162,11 @@ class MainViewModel(
             locationRepository.stopSpoofing(context)
             _uiState.update {
                 it.copy(
-                    isSpoofingActive = false,
-                    wifiLoadStatus = WifiLoadStatus.IDLE,
-                    wifiApCount = 0
+                    isSpoofingActive = false
                 )
             }
         }
     }
-
-    // 摇杆控制
 
     fun moveByJoystick(bearing: Double, intensity: Float, maxSpeedMs: Float) {
         val elapsedSec = 0.1
@@ -196,16 +195,12 @@ class MainViewModel(
                 showCoordinateError = false
             )
         }
-        // 实时同步给 SpooferProvider
         SpooferProvider.latitude = newLat
         SpooferProvider.longitude = newLng
         SpooferProvider.simBearing = bearing.toFloat()
         SpooferProvider.startTimestamp = System.currentTimeMillis()
     }
 
-    // 路线规划状态机
-
-    /** 进入全屏地图，进入选点阶段 */
     fun enterRoutePlanning() {
         _uiState.update {
             it.copy(
@@ -215,12 +210,10 @@ class MainViewModel(
         }
     }
 
-    /** 地图中心确认添加路点 */
     fun addRoutePoint(lat: Double, lng: Double) {
         _uiState.update { it.copy(routePoints = it.routePoints + RoutePoint(lat, lng)) }
     }
 
-    /** 撤销最后一个路点 */
     fun undoLastRoutePoint() {
         _uiState.update { state ->
             if (state.routePoints.isEmpty()) state
@@ -228,13 +221,11 @@ class MainViewModel(
         }
     }
 
-    /** 结束选点 → READY */
     fun finishSelectingPoints() {
         if (_uiState.value.routePoints.size < 2) return
         _uiState.update { it.copy(routePlanStage = RoutePlanStage.READY) }
     }
 
-    /** 重新选点：清空路点，回到 SELECTING */
     fun restartSelectingPoints() {
         _uiState.update {
             it.copy(
@@ -244,29 +235,24 @@ class MainViewModel(
         }
     }
 
-    /** 设置路线运行模式 */
     fun setRouteRunMode(mode: RouteRunMode) {
         _uiState.update { it.copy(routeRunMode = mode) }
     }
 
-    /** 设置循环模式速度 */
     fun setRouteSimMode(mode: SimMode) {
         _uiState.update { it.copy(routeSimMode = mode) }
     }
 
-    /** 设置自定义速度 (m/s) */
     fun setCustomSpeedMs(speed: Double) {
         _uiState.update { it.copy(customSpeedMs = speed.coerceIn(0.1, 100.0)) }
     }
 
-    /** 获取实际生效的速度 (m/s) */
     private fun getEffectiveSpeedMs(): Double {
         val state = _uiState.value
         return if (state.routeSimMode == SimMode.CUSTOM) state.customSpeedMs
         else state.routeSimMode.speedMs
     }
 
-    /** 首页地图确认选点 */
     fun confirmMapPoint(lat: Double, lng: Double) {
         _uiState.update {
             it.copy(
@@ -278,16 +264,10 @@ class MainViewModel(
         }
     }
 
-    /** 清除地图选点状态 */
     fun clearMapPoint() {
         _uiState.update { it.copy(mapConfirmedPoint = null) }
     }
 
-    /**
-     * 开始路线模拟。
-     * - 手动模式：启动 spoofing（STILL），由摇杆驱动 moveByJoystick 实时更新坐标。
-     * - 循环模式：启动 spoofing，自动沿路线点按速度移动，到终点后反向循环。
-     */
     fun startRoutePlanning() {
         val state = _uiState.value
         if (state.routePoints.size < 2) return
@@ -304,39 +284,40 @@ class MainViewModel(
         val isLoop = state.routeRunMode == RouteRunMode.LOOP
 
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val routePoints = if (isLoop) {
-                // 循环路线不需要追加起点，由 autoRouteLoop 自行处理往返
-                state.routePoints
-            } else {
-                state.routePoints
+            _uiState.update {
+                it.copy(
+                    isSpoofingActive = true
+                )
             }
-
+            
+            val now = System.currentTimeMillis()
+            // 立即开启模拟，消除等待网络请求的延迟
             locationRepository.startSpoofing(
                 context, startPoint.lat, startPoint.lng,
                 if (isLoop) state.routeSimMode.name else "STILL",
-                0f, now, routePoints, isLoop
+                0f, now, state.routePoints, isLoop
             )
-            _uiState.update {
-                it.copy(
-                    isSpoofingActive = true,
-                    wifiLoadStatus = WifiLoadStatus.LOADING,
-                    wifiApCount = 0
-                )
+            Log.i("MainViewModel", ">>> ROUTE MODE STARTED IMMEDIATELY.")
+
+            // 后台异步获取基站数据并更新
+            launch(Dispatchers.IO) {
+                try {
+                    Log.i("MainViewModel", ">>> Fetching Cell Data for Route Spoofing...")
+                    val cellJson = cellRepository.fetchCellData(startPoint.lat, startPoint.lng, openCellIdToken)
+                    Log.i("MainViewModel", ">>> Route Cell data complete.")
+                    locationRepository.updateWifiJson("[]")
+                    locationRepository.updateCellJson(cellJson)
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Fetch Route Cell Data failed", e)
+                }
             }
-            val wifiJson = wifiRepository.fetchWifiData(startPoint.lat, startPoint.lng, wigleToken)
-            val apCount = try { org.json.JSONArray(wifiJson).length() } catch (e: Exception) { 0 }
-            locationRepository.updateWifiJson(wifiJson)
-            _uiState.update { it.copy(wifiLoadStatus = WifiLoadStatus.DONE, wifiApCount = apCount) }
         }
 
         if (isLoop) {
             startAutoRouteLoop()
         }
-        // 手动模式不需要 sync loop，由摇杆直接驱动
     }
 
-    /** 停止路线模拟，重置所有状态 */
     fun stopRoutePlanning() {
         locationSyncJob?.cancel()
         locationSyncJob = null
@@ -347,8 +328,6 @@ class MainViewModel(
             _uiState.update {
                 it.copy(
                     isSpoofingActive = false,
-                    wifiLoadStatus = WifiLoadStatus.IDLE,
-                    wifiApCount = 0,
                     routePlanStage = RoutePlanStage.IDLE,
                     routePoints = emptyList(),
                     routeRunMode = RouteRunMode.MANUAL
@@ -356,8 +335,6 @@ class MainViewModel(
             }
         }
     }
-
-    // 保存位置
 
     fun saveCurrentLocation(name: String) {
         val lng = _uiState.value.longitudeInput.toDoubleOrNull() ?: return
@@ -371,8 +348,6 @@ class MainViewModel(
         _uiState.update { it.copy(savedLocations = settingsRepository.getSavedLocations()) }
     }
 
-    // 搜索
-
     fun updateSearchKeyword(keyword: String) {
         _uiState.update { it.copy(searchKeyword = keyword) }
     }
@@ -381,13 +356,6 @@ class MainViewModel(
         _uiState.update { it.copy(searchResults = results) }
     }
 
-    // 内部工具
-
-    /**
-     * 循环模式自动移动。
-     * 按路点顺序移动，到终点后反向，不断循环。
-     * 同时实时同步坐标到 SpooferProvider。
-     */
     private fun startAutoRouteLoop() {
         autoRouteJob?.cancel()
         autoRouteJob = viewModelScope.launch(Dispatchers.Default) {
@@ -401,7 +369,7 @@ class MainViewModel(
             val tickSec = tickMs / 1000.0
             var forward = true
             var segmentIndex = 0
-            var progress = 0.0 // 当前段上已走过的距离（米）
+            var progress = 0.0
 
             while (isActive) {
                 val fromIdx = if (forward) segmentIndex else segmentIndex + 1
@@ -414,12 +382,10 @@ class MainViewModel(
                 progress += stepDist
 
                 if (progress >= segLen) {
-                    // 到达当前段终点
                     progress -= segLen
                     if (forward) {
                         segmentIndex++
                         if (segmentIndex >= points.lastIndex) {
-                            // 到达终点，反向
                             forward = false
                             segmentIndex = points.lastIndex - 1
                             progress = 0.0
@@ -427,30 +393,25 @@ class MainViewModel(
                     } else {
                         segmentIndex--
                         if (segmentIndex < 0) {
-                            // 回到起点，正向
                             forward = true
                             segmentIndex = 0
                             progress = 0.0
                         }
                     }
-                    // 重新获取段信息并继续
                     val newFrom = if (forward) points[segmentIndex] else points[segmentIndex + 1]
                     updatePosition(newFrom.lat, newFrom.lng, 0f)
                 } else {
-                    // 在段中间插值
                     val ratio = if (segLen > 0) progress / segLen else 0.0
                     val lat = from.lat + (to.lat - from.lat) * ratio
                     val lng = from.lng + (to.lng - from.lng) * ratio
                     val bearing = bearingBetween(from, to).toFloat()
                     updatePosition(lat, lng, bearing)
                 }
-
                 delay(tickMs)
             }
         }
     }
 
-    /** 更新当前模拟位置到 UI 和 SpooferProvider */
     private fun updatePosition(lat: Double, lng: Double, bearing: Float) {
         _uiState.update {
             it.copy(
